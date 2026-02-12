@@ -1,0 +1,137 @@
+:root {
+  --bg: #141414;
+  --text: #d1d1d1;
+  --muted: #9f9f9f;
+  --line: #1f1f1f;
+  --link: #d1d1d1;
+}
+
+@font-face {
+  font-family: "Berkeley Mono";
+  src: url("/BerkeleyMono_Regular-s.p.2b82fbad.ttf.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: "Berkeley Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.app {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 16px 12px 40px;
+  text-align: left;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.brand {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.story-list {
+  display: grid;
+  gap: 10px;
+}
+
+.story {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.story-title {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.story-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.domain {
+  color: var(--muted);
+}
+
+.pager {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 9px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.story-page-title {
+  font-size: 13px;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+
+.story-page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.story-text {
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.status {
+  color: var(--muted);
+}
