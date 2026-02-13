@@ -1,14 +1,18 @@
 :root {
-  --bg: #141414;
+  --bg: #0d0d0d;
   --text: #d1d1d1;
   --muted: #9f9f9f;
   --line: #1f1f1f;
   --link: #d1d1d1;
+  --c-red:    #00E5FF; /* POINTS (cyan) */
+  --c-blue:   #C77DFF; /* USER (purple) */
+  --c-orange: #FF6B35; /* TIME (burnt neon) */
+  --c-green:  #5C7CFA; /* DOMAIN (indigo-blue) */
+  --c-yellow: #FFD60A; /* OPEN (gold) */
 }
-
 @font-face {
   font-family: "Berkeley Mono";
-  src: url("/BerkeleyMono_Regular-s.p.2b82fbad.ttf.otf") format("opentype");
+  src: url("./BerkeleyMono_Regular-s.p.2b82fbad.ttf.otf") format("opentype");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
@@ -37,18 +41,22 @@ body {
 
 a {
   color: var(--link);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: rgba(209, 209, 209, 0.35);
+  text-underline-offset: 0.14em;
+  text-decoration-thickness: 1px;
 }
 
 a:hover {
-  text-decoration: underline;
+  text-decoration-color: rgba(209, 209, 209, 0.85);
 }
 
 .app {
-  max-width: 750px;
+  max-width: 92ch;
   margin: 0 auto;
   padding: 16px 12px 40px;
   text-align: left;
+  overflow-x: hidden;
 }
 
 .topbar {
@@ -76,8 +84,12 @@ a:hover {
 }
 
 .story-title {
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.story-title a {
+  color: #fff;
 }
 
 .story-meta {
@@ -89,7 +101,23 @@ a:hover {
 }
 
 .domain {
-  color: var(--muted);
+  color: var(--c-green);
+}
+
+.meta-points {
+  color: var(--c-red);
+}
+
+.meta-user {
+  color: var(--c-blue);
+}
+
+.meta-time {
+  color: var(--c-orange);
+}
+
+.meta-comments a {
+  color: var(--c-yellow);
 }
 
 .pager {
@@ -113,25 +141,153 @@ a:hover {
   cursor: default;
 }
 
-.story-page-title {
-  font-size: 13px;
-  line-height: 1.35;
-  margin-bottom: 6px;
+.status {
+  color: var(--muted);
 }
 
-.story-page-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: var(--muted);
+.story,
+.story-text,
+.comments,
+.comment,
+.comment-children,
+.comment-text {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.story-detail {
+  border-bottom: 1px solid var(--line);
   margin-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 .story-text {
-  line-height: 1.5;
-  margin-bottom: 16px;
+  margin-top: 8px;
 }
 
-.status {
+.story-text p {
+  margin: 0 0 8px;
+}
+
+.comments {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.comments-title {
+  margin: 0 0 8px;
   color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.comment-children {
+  display: grid;
+  gap: 6px;
+}
+
+.comment {
+  --comment-depth: 0;
+  width: 100%;
+  border-left: 1px solid var(--line);
+  padding: 5px 0 0 clamp(0px, calc(var(--comment-depth) * 12px), 132px);
+}
+
+.comment-more {
+  border-left-style: dashed;
+}
+
+.comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+}
+
+.comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.comment-actions .btn {
+  padding: 2px 6px;
+}
+
+.comment-text {
+  margin-top: 4px;
+}
+
+.comment-text,
+.comment-text * {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.comment.is-collapsed .comment-text,
+.comment.is-collapsed .comment-children {
+  display: none;
+}
+
+.comment-loading .comment-meta,
+.comment-failed .comment-meta {
+  color: var(--muted);
+}
+
+pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+img,
+video,
+iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Modern Dev Console Skin */
+#app {
+  border: 1px solid #262626;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
+    rgba(8, 8, 8, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 14px 40px rgba(0, 0, 0, 0.5);
+}
+
+.story-list .story {
+  position: relative;
+  margin: 0 -12px;
+  padding: 9px 12px 10px 28px;
+  border-bottom: 1px solid #1a1a1a;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.story-list .story::before {
+  content: "▸";
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  color: transparent;
+  transition: color 120ms ease;
+}
+
+.story-list .story:hover,
+.story-list .story:focus-within,
+.story-list .story.is-selected {
+  background: rgba(77, 124, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(77, 124, 255, 0.3);
+}
+
+.story-list .story:hover::before,
+.story-list .story:focus-within::before,
+.story-list .story.is-selected::before {
+  color: #9ab6ff;
 }
