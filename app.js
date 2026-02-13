@@ -16,6 +16,8 @@ const READER_ENDPOINT = "/api/reader";
 const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
 const THEME_TERMINAL = "terminal";
 const THEME_BLOOMBERG = "bloomberg";
+const THEME_BLOOMBERG_LIGHT = "bloomberg-light";
+const THEMES = [THEME_TERMINAL, THEME_BLOOMBERG, THEME_BLOOMBERG_LIGHT];
 const app = document.getElementById("app");
 app?.classList.add("shell");
 
@@ -148,7 +150,7 @@ function escapeHTML(value) {
 }
 
 function normalizeTheme(theme) {
-  return theme === THEME_BLOOMBERG ? THEME_BLOOMBERG : THEME_TERMINAL;
+  return THEMES.includes(theme) ? theme : THEME_TERMINAL;
 }
 
 function loadSavedTheme() {
@@ -167,7 +169,13 @@ function saveTheme(theme) {
 }
 
 function getThemeLabel(theme = currentTheme) {
-  return theme === THEME_BLOOMBERG ? "Theme: Bloomberg" : "Theme: Terminal";
+  if (theme === THEME_BLOOMBERG) {
+    return "Theme: Bloomberg";
+  }
+  if (theme === THEME_BLOOMBERG_LIGHT) {
+    return "Theme: Bloomberg Light";
+  }
+  return "Theme: Terminal";
 }
 
 function updateThemeToggleLabels() {
@@ -188,7 +196,9 @@ function applyTheme(theme, { persist = false } = {}) {
 }
 
 function toggleTheme() {
-  const next = currentTheme === THEME_BLOOMBERG ? THEME_TERMINAL : THEME_BLOOMBERG;
+  const currentIndex = THEMES.indexOf(currentTheme);
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % THEMES.length : 0;
+  const next = THEMES[nextIndex];
   applyTheme(next, { persist: true });
 }
 
