@@ -3,6 +3,7 @@ const PAGE_SIZE = 30;
 const MAX_CONCURRENCY = 8;
 const ITEM_TTL_MS = 3 * 60 * 1000;
 const ITEM_CACHE_STORAGE_KEY = "hn-fork:item-cache:v1";
+const THEME_STORAGE_KEY = "hn-fork:theme:v1";
 const ITEM_CACHE_MAX_ENTRIES = 1200;
 const ITEM_CACHE_PERSIST_MAX_ENTRIES = 280;
 const COMMENTS_BATCH_SIZE = 20;
@@ -13,6 +14,8 @@ const PREVIEW_EMBED_BLOCKED_MESSAGE =
   "This site may block embedding. Use Open in new tab.";
 const READER_ENDPOINT = "/api/reader";
 const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
+const THEME_TERMINAL = "terminal";
+const THEME_BLOOMBERG = "bloomberg";
 const app = document.getElementById("app");
 app?.classList.add("shell");
 
@@ -28,6 +31,7 @@ let persistItemCacheTimer = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
 let activeListPage = 1;
+let currentTheme = THEME_TERMINAL;
 const previewState = {
   activeUrl: "",
   loadToken: 0,
@@ -37,6 +41,7 @@ const previewState = {
 };
 let readabilityModulePromise = null;
 
+applyTheme(loadSavedTheme());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("load", handleRouteChange);
 document.addEventListener("keydown", handleGlobalKeydown);
@@ -140,6 +145,64 @@ function parseRoute() {
 function escapeHTML(value) {
   unescape.textContent = value ?? "";
   return unescape.innerHTML;
+}
+
+function normalizeTheme(theme) {
+  return theme === THEME_BLOOMBERG ? THEME_BLOOMBERG : THEME_TERMINAL;
+}
+
+function loadSavedTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return normalizeTheme(saved);
+  } catch {
+    return THEME_TERMINAL;
+  }
+}
+
+function saveTheme(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, normalizeTheme(theme));
+  } catch {}
+}
+
+function getThemeLabel(theme = currentTheme) {
+  return theme === THEME_BLOOMBERG ? "Theme: Bloomberg" : "Theme: Terminal";
+}
+
+function updateThemeToggleLabels() {
+  const label = getThemeLabel();
+  app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.textContent = label;
+    button.setAttribute("aria-label", label);
+  });
+}
+
+function applyTheme(theme, { persist = false } = {}) {
+  currentTheme = normalizeTheme(theme);
+  document.documentElement.dataset.theme = currentTheme;
+  if (persist) {
+    saveTheme(currentTheme);
+  }
+  updateThemeToggleLabels();
+}
+
+function toggleTheme() {
+  const next = currentTheme === THEME_BLOOMBERG ? THEME_TERMINAL : THEME_BLOOMBERG;
+  applyTheme(next, { persist: true });
+}
+
+function wireThemeToggleButtons(root = app) {
+  root.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    if (button.dataset.wired) {
+      return;
+    }
+    button.dataset.wired = "true";
+    button.addEventListener("click", () => {
+      toggleTheme();
+    });
+  });
+  updateThemeToggleLabels();
 }
 
 function createAbortError() {
@@ -1174,10 +1237,16 @@ function timeAgo(unixSeconds) {
 }
 
 function topbar(content) {
+  const rightContent = content ?? "";
   return `
     <header class="topbar">
-      <a class="brand" href="#/">hn fork</a>
-      ${content ?? ""}
+      <a class="brand" href="#/">HNx</a>
+      <div class="topbar-actions">
+        ${rightContent}
+        <button class="btn theme-toggle" type="button" data-theme-toggle>
+          ${getThemeLabel()}
+        </button>
+      </div>
     </header>
   `;
 }
@@ -1285,6 +1354,7 @@ async function renderListPage(page) {
         </article>
       </aside>
     `;
+    wireThemeToggleButtons();
 
     const listEl = app.querySelector(".story-list");
     if (!listEl) {
@@ -1328,6 +1398,7 @@ async function renderListPage(page) {
     if (nextTopbar && currentTopbar) {
       currentTopbar.replaceWith(nextTopbar);
       wirePagination();
+      wireThemeToggleButtons();
     }
 
     if (!pageIds.length) {
@@ -1440,6 +1511,7 @@ async function renderListPage(page) {
       ${topbar("")}
       <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
     `;
+    wireThemeToggleButtons();
   }
 }
 
@@ -2079,6 +2151,7 @@ async function renderStoryPage(id) {
       ${topbar('<a class="btn" href="#/">back</a>')}
       <p class="status">Invalid story id.</p>
     `;
+    wireThemeToggleButtons();
     return;
   }
 
@@ -2097,6 +2170,7 @@ async function renderStoryPage(id) {
       <div class="comment-children" data-comments-root></div>
     </section>
   `;
+  wireThemeToggleButtons();
 
   const detailSlot = app.querySelector(".story-detail");
   const commentsSection = app.querySelector(".comments");

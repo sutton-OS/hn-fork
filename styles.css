@@ -1,9 +1,13 @@
 :root {
   --bg: #0d0d0d;
+  --surface: rgba(8, 8, 8, 0.92);
+  --elevated: rgba(8, 8, 8, 0.94);
   --text: #d1d1d1;
   --muted: #9f9f9f;
   --line: #1f1f1f;
   --link: #d1d1d1;
+  --font-family: "Berkeley Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", monospace;
   --c-red:    #00E5FF; /* POINTS (cyan) */
   --c-blue:   #C77DFF; /* USER (purple) */
   --c-orange: #FF6B35; /* TIME (burnt neon) */
@@ -16,6 +20,135 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayXXThin.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 100;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayXThin.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayThin.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 250;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayLight.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayRoman.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayMediu.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayBold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayBlack.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayXXThinItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 100;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayXThinItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 200;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayThinItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 250;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayLightItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayRomanItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayMediumItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayBoldItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Neue Haas Grotesk Display Pro";
+  src: url("./fonts/NeueHaasDisplayBlackItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 900;
+  font-display: swap;
+}
+
+:root[data-theme="bloomberg"] {
+  --bg: #0f1113;
+  --surface: #161a1e;
+  --elevated: #1d2227;
+  --line: #2e3236;
+  --text: #f0f2f5;
+  --muted: #b7bdc6;
+  --link: var(--text);
+  --font-family: "Neue Haas Grotesk Display Pro", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  --c-red: var(--muted);
+  --c-blue: var(--muted);
+  --c-orange: var(--muted);
+  --c-green: var(--muted);
+  --c-yellow: var(--text);
 }
 
 *,
@@ -33,8 +166,7 @@ body {
 }
 
 body {
-  font-family: "Berkeley Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", monospace;
+  font-family: var(--font-family);
   font-size: 9px;
   line-height: 1.5;
 }
@@ -66,6 +198,14 @@ a:hover {
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .brand {
@@ -513,6 +653,76 @@ iframe {
   color: #9ab6ff;
 }
 
+:root[data-theme="bloomberg"] a {
+  color: var(--link);
+  text-decoration-color: rgba(240, 242, 245, 0.35);
+}
+
+:root[data-theme="bloomberg"] a:hover {
+  text-decoration-color: rgba(240, 242, 245, 0.85);
+}
+
+:root[data-theme="bloomberg"] .story-title a,
+:root[data-theme="bloomberg"] .preview-title,
+:root[data-theme="bloomberg"] .preview-reader-title {
+  color: var(--text);
+}
+
+:root[data-theme="bloomberg"] #app,
+:root[data-theme="bloomberg"] .shell.is-preview-open,
+:root[data-theme="bloomberg"] .shell.is-preview-open .list-pane {
+  border-color: var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
+    var(--surface);
+}
+
+:root[data-theme="bloomberg"] .preview-card {
+  border-color: var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
+    var(--elevated);
+}
+
+:root[data-theme="bloomberg"] .preview-frame-wrap,
+:root[data-theme="bloomberg"] .preview-frame,
+:root[data-theme="bloomberg"] .preview-reader {
+  background: var(--bg);
+}
+
+:root[data-theme="bloomberg"] .preview-reader-body {
+  color: rgba(240, 242, 245, 0.9);
+}
+
+:root[data-theme="bloomberg"] .preview-loading,
+:root[data-theme="bloomberg"] .preview-fallback {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+:root[data-theme="bloomberg"] .preview-fallback[data-kind="warning"] {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+:root[data-theme="bloomberg"] .story-list .story {
+  border-bottom-color: var(--line);
+}
+
+:root[data-theme="bloomberg"] .story-list .story:hover,
+:root[data-theme="bloomberg"] .story-list .story:focus-within,
+:root[data-theme="bloomberg"] .story-list .story.is-selected {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="bloomberg"] .story-list .story:hover::before,
+:root[data-theme="bloomberg"] .story-list .story:focus-within::before,
+:root[data-theme="bloomberg"] .story-list .story.is-selected::before {
+  color: var(--muted);
+}
+
 @media (max-width: 899px) {
   .shell.is-preview-open {
     display: block;
@@ -520,11 +730,11 @@ iframe {
     max-width: 92ch;
     margin: 0 auto;
     padding: 16px 12px 40px;
-    border: 1px solid #262626;
+    border: 1px solid var(--line);
     border-radius: 8px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
-      rgba(8, 8, 8, 0.92);
+      var(--surface);
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.04),
       0 14px 40px rgba(0, 0, 0, 0.5);
