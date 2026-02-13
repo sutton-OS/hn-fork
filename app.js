@@ -7,7 +7,14 @@ const ITEM_CACHE_MAX_ENTRIES = 1200;
 const ITEM_CACHE_PERSIST_MAX_ENTRIES = 280;
 const COMMENTS_BATCH_SIZE = 20;
 const COMMENTS_AUTO_RENDER_LIMIT = 200;
+const PREVIEW_HASH_PREFIX = "p=";
+const PREVIEW_BLOCK_TIMEOUT_MS = 2500;
+const PREVIEW_EMBED_BLOCKED_MESSAGE =
+  "This site may block embedding. Use Open in new tab.";
+const READER_ENDPOINT = "/api/reader";
+const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
 const app = document.getElementById("app");
+app?.classList.add("shell");
 
 const store = {
   bestStoryIds: [],
@@ -20,14 +27,37 @@ let currentViewController = null;
 let persistItemCacheTimer = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
+let activeListPage = 1;
+const previewState = {
+  activeUrl: "",
+  loadToken: 0,
+  blockedTimer: null,
+  readerController: null,
+  mode: "embed",
+};
+let readabilityModulePromise = null;
 
-window.addEventListener("hashchange", render);
-window.addEventListener("load", render);
+window.addEventListener("hashchange", handleRouteChange);
+window.addEventListener("load", handleRouteChange);
+document.addEventListener("keydown", handleGlobalKeydown);
 
-async function render() {
+async function handleRouteChange() {
+  const route = parseRoute();
+
+  if (canHandleRouteInPlace(route)) {
+    applyListRoute(route);
+    return;
+  }
+
+  await renderRoute(route);
+}
+
+async function renderRoute(route = parseRoute()) {
   abortCurrentViewLoad();
   teardownListSelection();
-  const route = parseRoute();
+  closePreview({ updateHash: false });
+  app.classList.remove("is-preview-open");
+  app.dataset.view = "";
   app.innerHTML = "";
 
   if (route.type === "story") {
@@ -35,7 +65,39 @@ async function render() {
     return;
   }
 
-  await renderListPage(route.page);
+  const targetPage = route.type === "preview" ? activeListPage : route.page;
+  await renderListPage(targetPage);
+  applyListRoute(route);
+}
+
+function canHandleRouteInPlace(route) {
+  if (app.dataset.view !== "list") {
+    return false;
+  }
+
+  if (route.type === "preview") {
+    return true;
+  }
+
+  if (route.type !== "list") {
+    return false;
+  }
+
+  const hash = window.location.hash.replace(/^#/, "").trim();
+  if (!hash || hash === "/" || route.page === activeListPage) {
+    return true;
+  }
+
+  return false;
+}
+
+function applyListRoute(route) {
+  if (route.type === "preview") {
+    openPreviewByUrl(route.url, { updateHash: false });
+    return;
+  }
+
+  closePreview({ updateHash: false });
 }
 
 function parseRoute() {
@@ -48,6 +110,18 @@ function parseRoute() {
   const pageMatch = hash.match(/^\/page\/(\d+)$/);
   if (pageMatch) {
     return { type: "list", page: Math.max(1, Number(pageMatch[1])) };
+  }
+
+  const previewMatch = hash.match(/^p=(.+)$/);
+  if (previewMatch) {
+    try {
+      const decoded = decodeURIComponent(previewMatch[1]);
+      const safeUrl = getSafeUrl(decoded);
+      if (safeUrl) {
+        return { type: "preview", url: safeUrl };
+      }
+    } catch {}
+    return { type: "list", page: 1 };
   }
 
   const storyMatch = hash.match(/^\/(?:item|story)\/(\d+)$/);
@@ -95,6 +169,485 @@ function navigateTo(pathname) {
       : `/${pathname}`;
 
   window.location.hash = normalizedPath;
+}
+
+function previewHashForUrl(url) {
+  return `#${PREVIEW_HASH_PREFIX}${encodeURIComponent(url)}`;
+}
+
+function clearPreviewBlockedTimer() {
+  if (previewState.blockedTimer) {
+    window.clearTimeout(previewState.blockedTimer);
+    previewState.blockedTimer = null;
+  }
+}
+
+function clearPreviewReaderController() {
+  if (previewState.readerController) {
+    previewState.readerController.abort();
+    previewState.readerController = null;
+  }
+}
+
+function getPreviewElements() {
+  const pane = app.querySelector("[data-preview-pane]");
+  if (!pane) {
+    return null;
+  }
+
+  const titleEl = pane.querySelector("[data-preview-title]");
+  const domainEl = pane.querySelector("[data-preview-domain]");
+  const closeButton = pane.querySelector("[data-preview-close]");
+  const readerButton = pane.querySelector("[data-preview-reader]");
+  const openLink = pane.querySelector("[data-preview-open]");
+  const iframe = pane.querySelector("[data-preview-frame]");
+  const loading = pane.querySelector("[data-preview-loading]");
+  const reader = pane.querySelector("[data-preview-reader-content]");
+  const fallback = pane.querySelector("[data-preview-fallback]");
+
+  if (
+    !titleEl ||
+    !domainEl ||
+    !closeButton ||
+    !readerButton ||
+    !openLink ||
+    !iframe ||
+    !loading ||
+    !reader ||
+    !fallback
+  ) {
+    return null;
+  }
+
+  return {
+    pane,
+    titleEl,
+    domainEl,
+    closeButton,
+    readerButton,
+    openLink,
+    iframe,
+    loading,
+    reader,
+    fallback,
+  };
+}
+
+function getPreviewDataFromLink(link) {
+  if (!link) {
+    return null;
+  }
+
+  const url = getSafeUrl(link.dataset.previewUrl || link.getAttribute("href"));
+  if (!url) {
+    return null;
+  }
+
+  const title = (link.dataset.previewTitle || link.textContent || "").trim();
+  const domain = (link.dataset.previewDomain || getDomain(url) || "").trim();
+  return { url, title, domain, row: link.closest(".story") };
+}
+
+function findStoryLinkByPreviewUrl(url) {
+  const safeUrl = getSafeUrl(url);
+  if (!safeUrl) {
+    return null;
+  }
+
+  const links = app.querySelectorAll(".story-list .story-title a[data-preview-url]");
+  for (const link of links) {
+    if (getSafeUrl(link.dataset.previewUrl) === safeUrl) {
+      return link;
+    }
+  }
+  return null;
+}
+
+function setSelectedStoryElement(storyEl, { scroll = false } = {}) {
+  if (!storyEl) {
+    return;
+  }
+  const stories = getListStoryElements();
+  const nextIndex = stories.indexOf(storyEl);
+  if (nextIndex < 0) {
+    return;
+  }
+  selectedStoryIndex = nextIndex;
+  applyListSelection({ scroll });
+}
+
+function setPreviewFallbackMessage(elements, message = "", { kind = "info" } = {}) {
+  const trimmed = (message || "").trim();
+  elements.fallback.textContent = trimmed;
+  elements.fallback.dataset.kind = trimmed ? kind : "";
+  elements.fallback.hidden = !trimmed;
+}
+
+function setPreviewLoadingVisible(elements, visible, message = "Loading preview...") {
+  elements.loading.hidden = !visible;
+  elements.loading.textContent = message;
+}
+
+function setPreviewMode(elements, mode) {
+  const normalizedMode = mode === "reader" ? "reader" : "embed";
+  previewState.mode = normalizedMode;
+  elements.reader.hidden = normalizedMode !== "reader";
+  elements.iframe.hidden = normalizedMode === "reader";
+  elements.readerButton.setAttribute("aria-pressed", normalizedMode === "reader" ? "true" : "false");
+  elements.readerButton.textContent = normalizedMode === "reader" ? "Web View" : "Reader View";
+}
+
+function setPreviewReaderButtonLoading(elements, loading) {
+  elements.readerButton.disabled = loading;
+  if (loading) {
+    elements.readerButton.textContent = "Loading Reader...";
+  } else {
+    elements.readerButton.textContent = previewState.mode === "reader" ? "Web View" : "Reader View";
+  }
+}
+
+function clearPreviewReaderContent(elements) {
+  elements.reader.replaceChildren();
+}
+
+function isFrameUsable(iframe) {
+  try {
+    const href = iframe.contentWindow?.location?.href || "";
+    return Boolean(href && href !== "about:blank" && href !== "about:srcdoc");
+  } catch {
+    return true;
+  }
+}
+
+function getSafeResolvedUrl(value, baseUrl = "") {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = baseUrl ? new URL(value, baseUrl) : new URL(value);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.href;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function getReadabilityCtor() {
+  if (!readabilityModulePromise) {
+    readabilityModulePromise = import(READABILITY_MODULE_URL).catch((error) => {
+      readabilityModulePromise = null;
+      throw error;
+    });
+  }
+
+  const module = await readabilityModulePromise;
+  const candidate = module?.Readability ?? module?.default?.Readability ?? module?.default;
+  if (typeof candidate !== "function") {
+    throw new Error("Readability is unavailable.");
+  }
+  return candidate;
+}
+
+function setReaderViewError(elements, message) {
+  clearPreviewReaderContent(elements);
+  const errorEl = document.createElement("p");
+  errorEl.className = "preview-reader-error";
+  errorEl.textContent = message;
+  elements.reader.appendChild(errorEl);
+}
+
+async function openReaderView() {
+  const elements = getPreviewElements();
+  if (!elements) {
+    return;
+  }
+
+  const safeUrl = getSafeUrl(previewState.activeUrl);
+  if (!safeUrl) {
+    return;
+  }
+
+  const protocol = new URL(safeUrl).protocol;
+  if (protocol !== "https:") {
+    setPreviewMode(elements, "embed");
+    setPreviewReaderButtonLoading(elements, false);
+    setPreviewLoadingVisible(elements, false);
+    setPreviewFallbackMessage(
+      elements,
+      "Reader View only supports https links. Use Open in new tab.",
+      { kind: "warning" },
+    );
+    return;
+  }
+
+  clearPreviewBlockedTimer();
+  clearPreviewReaderController();
+  const token = previewState.loadToken;
+  const controller = new AbortController();
+  previewState.readerController = controller;
+
+  setPreviewMode(elements, "reader");
+  clearPreviewReaderContent(elements);
+  setPreviewFallbackMessage(elements, "");
+  setPreviewLoadingVisible(elements, true, "Loading Reader View...");
+  setPreviewReaderButtonLoading(elements, true);
+
+  try {
+    const response = await fetch(`${READER_ENDPOINT}?url=${encodeURIComponent(safeUrl)}`, {
+      signal: controller.signal,
+      headers: {
+        Accept: "text/plain",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Reader request failed (${response.status}).`);
+    }
+
+    const html = await response.text();
+    if (
+      token !== previewState.loadToken ||
+      controller !== previewState.readerController ||
+      safeUrl !== previewState.activeUrl
+    ) {
+      return;
+    }
+
+    const finalUrl = response.headers.get("x-reader-final-url") || safeUrl;
+    const readabilityDocument = new DOMParser().parseFromString(html, "text/html");
+    if (readabilityDocument.head) {
+      const base = readabilityDocument.createElement("base");
+      base.href = finalUrl;
+      readabilityDocument.head.prepend(base);
+    }
+
+    const Readability = await getReadabilityCtor();
+    const article = new Readability(readabilityDocument).parse();
+
+    if (!article || (!article.content && !article.textContent)) {
+      throw new Error("No readable content was extracted.");
+    }
+
+    const safeContent = sanitizeReaderHTML(article.content || "", finalUrl);
+    if (!safeContent && article.textContent) {
+      const body = document.createElement("div");
+      body.className = "preview-reader-body";
+      body.textContent = article.textContent.trim();
+      elements.reader.replaceChildren(body);
+    } else if (!safeContent) {
+      throw new Error("No readable content was extracted.");
+    } else {
+      elements.reader.innerHTML = `
+        <article class="preview-reader-article">
+          <h3 class="preview-reader-title">${escapeHTML(article.title || "Reader View")}</h3>
+          ${article.excerpt ? `<p class="preview-reader-excerpt">${escapeHTML(article.excerpt)}</p>` : ""}
+          <div class="preview-reader-body">${safeContent}</div>
+        </article>
+      `;
+    }
+
+    setPreviewFallbackMessage(elements, "");
+  } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) {
+      return;
+    }
+    if (
+      token !== previewState.loadToken ||
+      controller !== previewState.readerController ||
+      safeUrl !== previewState.activeUrl
+    ) {
+      return;
+    }
+    setReaderViewError(elements, "Reader View could not extract this page.");
+    setPreviewFallbackMessage(elements, "Reader View failed. Use Open in new tab.", {
+      kind: "warning",
+    });
+  } finally {
+    if (controller === previewState.readerController) {
+      previewState.readerController = null;
+    }
+    if (token === previewState.loadToken) {
+      setPreviewLoadingVisible(elements, false);
+      setPreviewReaderButtonLoading(elements, false);
+    }
+  }
+}
+
+function toggleReaderView() {
+  const elements = getPreviewElements();
+  if (!elements || !previewState.activeUrl) {
+    return;
+  }
+
+  if (previewState.mode === "reader") {
+    clearPreviewReaderController();
+    openPreviewByUrl(previewState.activeUrl, { updateHash: false });
+    return;
+  }
+
+  openReaderView();
+}
+
+function openPreview(preview, { updateHash = false } = {}) {
+  if (!preview?.url) {
+    return false;
+  }
+
+  const safeUrl = getSafeUrl(preview.url);
+  if (!safeUrl) {
+    return false;
+  }
+
+  const elements = getPreviewElements();
+  if (!elements) {
+    return false;
+  }
+
+  const title = (preview.title || safeUrl).trim();
+  const domain = (preview.domain || getDomain(safeUrl) || "").trim();
+
+  clearPreviewBlockedTimer();
+  clearPreviewReaderController();
+  previewState.loadToken += 1;
+  const token = previewState.loadToken;
+
+  elements.titleEl.textContent = title;
+  elements.domainEl.textContent = domain;
+  elements.openLink.href = safeUrl;
+  elements.pane.classList.add("is-open");
+  elements.pane.setAttribute("aria-hidden", "false");
+  setPreviewMode(elements, "embed");
+  setPreviewReaderButtonLoading(elements, false);
+  clearPreviewReaderContent(elements);
+
+  const protocol = new URL(safeUrl).protocol;
+  if (protocol === "http:") {
+    setPreviewLoadingVisible(elements, false);
+    setPreviewFallbackMessage(
+      elements,
+      "This link uses http:// and cannot be embedded on an https page. Use Open in new tab.",
+      { kind: "warning" },
+    );
+    elements.iframe.onload = null;
+    elements.iframe.onerror = null;
+    elements.iframe.removeAttribute("src");
+  } else {
+    setPreviewFallbackMessage(elements, "");
+    setPreviewLoadingVisible(elements, true, "Loading preview...");
+
+    elements.iframe.onload = () => {
+      if (token !== previewState.loadToken || previewState.mode !== "embed") {
+        return;
+      }
+      clearPreviewBlockedTimer();
+      setPreviewLoadingVisible(elements, false);
+      if (isFrameUsable(elements.iframe)) {
+        setPreviewFallbackMessage(elements, "");
+      } else {
+        setPreviewFallbackMessage(elements, PREVIEW_EMBED_BLOCKED_MESSAGE, { kind: "warning" });
+      }
+    };
+
+    elements.iframe.onerror = () => {
+      if (token !== previewState.loadToken || previewState.mode !== "embed") {
+        return;
+      }
+      clearPreviewBlockedTimer();
+      setPreviewLoadingVisible(elements, false);
+      setPreviewFallbackMessage(elements, PREVIEW_EMBED_BLOCKED_MESSAGE, { kind: "warning" });
+    };
+
+    elements.iframe.src = safeUrl;
+    previewState.blockedTimer = window.setTimeout(() => {
+      if (token !== previewState.loadToken || previewState.mode !== "embed") {
+        return;
+      }
+      setPreviewLoadingVisible(elements, false);
+      setPreviewFallbackMessage(elements, PREVIEW_EMBED_BLOCKED_MESSAGE, { kind: "warning" });
+    }, PREVIEW_BLOCK_TIMEOUT_MS);
+  }
+
+  previewState.activeUrl = safeUrl;
+  app.classList.add("is-preview-open");
+
+  if (preview.row) {
+    setSelectedStoryElement(preview.row);
+  }
+
+  if (updateHash) {
+    const nextHash = previewHashForUrl(safeUrl);
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+  }
+
+  return true;
+}
+
+function openPreviewByUrl(url, { updateHash = false } = {}) {
+  const safeUrl = getSafeUrl(url);
+  if (!safeUrl) {
+    closePreview({ updateHash: false });
+    return false;
+  }
+
+  const matchedLink = findStoryLinkByPreviewUrl(safeUrl);
+  const linkedPreview = matchedLink
+    ? getPreviewDataFromLink(matchedLink)
+    : {
+        url: safeUrl,
+        title: safeUrl,
+        domain: getDomain(safeUrl),
+        row: null,
+      };
+
+  return openPreview(linkedPreview, { updateHash });
+}
+
+function closePreview({ updateHash = false } = {}) {
+  clearPreviewBlockedTimer();
+  clearPreviewReaderController();
+  previewState.loadToken += 1;
+  previewState.activeUrl = "";
+  previewState.mode = "embed";
+
+  const elements = getPreviewElements();
+  if (elements) {
+    elements.pane.classList.remove("is-open");
+    elements.pane.setAttribute("aria-hidden", "true");
+    elements.titleEl.textContent = "Story preview";
+    elements.domainEl.textContent = "";
+    elements.openLink.removeAttribute("href");
+    setPreviewMode(elements, "embed");
+    setPreviewReaderButtonLoading(elements, false);
+    clearPreviewReaderContent(elements);
+    setPreviewLoadingVisible(elements, false);
+    setPreviewFallbackMessage(elements, "");
+    elements.iframe.onload = null;
+    elements.iframe.onerror = null;
+    elements.iframe.removeAttribute("src");
+  }
+
+  app.classList.remove("is-preview-open");
+
+  if (updateHash && window.location.hash.startsWith(`#${PREVIEW_HASH_PREFIX}`)) {
+    window.location.hash = "";
+  }
+}
+
+function handleGlobalKeydown(event) {
+  if (event.defaultPrevented || event.key !== "Escape") {
+    return;
+  }
+
+  if (!app.classList.contains("is-preview-open")) {
+    return;
+  }
+
+  event.preventDefault();
+  closePreview({ updateHash: true });
 }
 
 function getListStoryElements() {
@@ -208,6 +761,12 @@ function isEditableTarget(target) {
 function openSelectedStory() {
   const link = getSelectedStoryLink();
   if (!link) {
+    return;
+  }
+
+  const preview = getPreviewDataFromLink(link);
+  if (preview) {
+    openPreview(preview, { updateHash: true });
     return;
   }
 
@@ -681,9 +1240,50 @@ async function renderListPage(page) {
   currentViewController = controller;
 
   try {
+    app.dataset.view = "list";
     app.innerHTML = `
-      ${topbar(loadingPager(page))}
-      <section class="story-list"></section>
+      <section class="list-pane">
+        ${topbar(loadingPager(page))}
+        <section class="story-list"></section>
+      </section>
+      <aside class="preview-pane" data-preview-pane aria-hidden="true">
+        <article class="preview-card">
+          <header class="preview-header">
+            <div class="preview-heading">
+              <h2 class="preview-title" data-preview-title>Story preview</h2>
+              <span class="preview-domain" data-preview-domain></span>
+            </div>
+            <div class="preview-actions">
+              <button class="btn" type="button" data-preview-close>Close</button>
+              <button class="btn" type="button" data-preview-reader aria-pressed="false">
+                Reader View
+              </button>
+              <a
+                class="btn"
+                data-preview-open
+                href=""
+                target="_blank"
+                rel="noopener noreferrer"
+              >Open in new tab</a>
+            </div>
+          </header>
+          <div class="preview-frame-wrap">
+            <iframe
+              class="preview-frame"
+              data-preview-frame
+              loading="lazy"
+              referrerpolicy="strict-origin-when-cross-origin"
+              sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+              title="Story preview"
+            ></iframe>
+            <p class="preview-loading" data-preview-loading hidden>Loading preview...</p>
+            <article class="preview-reader" data-preview-reader-content hidden></article>
+            <p class="preview-fallback" data-preview-fallback hidden>
+              This site may block embedding. Use Open in new tab.
+            </p>
+          </div>
+        </article>
+      </aside>
     `;
 
     const listEl = app.querySelector(".story-list");
@@ -691,9 +1291,26 @@ async function renderListPage(page) {
       return;
     }
 
+    const closePreviewButton = app.querySelector("[data-preview-close]");
+    if (closePreviewButton && !closePreviewButton.dataset.wired) {
+      closePreviewButton.dataset.wired = "true";
+      closePreviewButton.addEventListener("click", () => {
+        closePreview({ updateHash: true });
+      });
+    }
+
+    const readerViewButton = app.querySelector("[data-preview-reader]");
+    if (readerViewButton && !readerViewButton.dataset.wired) {
+      readerViewButton.dataset.wired = "true";
+      readerViewButton.addEventListener("click", () => {
+        toggleReaderView();
+      });
+    }
+
     let start = (Math.max(1, page) - 1) * PAGE_SIZE;
     let slots = renderLoadingRows(listEl, PAGE_SIZE, start);
     initializeListSelection(listEl);
+    applyListRoute(parseRoute());
 
     const ids = await getBestStoryIds({ signal: controller.signal });
     if (controller.signal.aborted || currentViewController !== controller) {
@@ -702,6 +1319,7 @@ async function renderListPage(page) {
 
     const totalPages = Math.max(1, Math.ceil(ids.length / PAGE_SIZE));
     const safePage = Math.min(Math.max(1, page), totalPages);
+    activeListPage = safePage;
     start = (safePage - 1) * PAGE_SIZE;
     const pageIds = ids.slice(start, start + PAGE_SIZE);
 
@@ -732,9 +1350,23 @@ async function renderListPage(page) {
       current.replaceWith(next);
       slots[slotIndex] = next;
       applyListSelection({ scroll: false });
+      applyListRoute(parseRoute());
     };
 
     listEl.addEventListener("click", async (event) => {
+      const titleLink = event.target.closest(".story-title a");
+      if (titleLink && listEl.contains(titleLink)) {
+        event.preventDefault();
+        const preview = getPreviewDataFromLink(titleLink);
+        if (preview) {
+          if (preview.row) {
+            setSelectedStoryElement(preview.row);
+          }
+          openPreview(preview, { updateHash: true });
+        }
+        return;
+      }
+
       const retryButton = event.target.closest("[data-retry-id]");
       if (!retryButton) {
         return;
@@ -828,15 +1460,25 @@ function renderStoryRow(story, index) {
 
   const domain = getDomain(story.url);
   const safeUrl = getSafeUrl(story.url);
+  const previewUrl = safeUrl || `https://news.ycombinator.com/item?id=${story.id}`;
+  const previewDomain = domain || getDomain(previewUrl);
   const commentsCount = story.descendants ?? 0;
   const localCommentsUrl = `#/item/${story.id}`;
-  const storyTitle = escapeHTML(story.title || "Untitled");
-  const titleContent = safeUrl
-    ? `<a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer">${index}. ${storyTitle}</a>`
-    : `<a href="${localCommentsUrl}">${index}. ${storyTitle}</a>`;
+  const storyTitleRaw = story.title || "Untitled";
+  const storyTitle = escapeHTML(storyTitleRaw);
+  const escapedPreviewUrl = escapeHTML(previewUrl);
+  const titleContent = `
+    <a
+      href="${escapedPreviewUrl}"
+      data-preview-url="${escapedPreviewUrl}"
+      data-preview-title="${escapeHTML(storyTitleRaw)}"
+      data-preview-domain="${escapeHTML(previewDomain)}"
+      data-story-id="${story.id}"
+    >${index}. ${storyTitle}</a>
+  `;
 
   return `
-    <article class="story">
+    <article class="story" data-preview-url="${escapedPreviewUrl}">
       <div class="story-title">
         ${titleContent}
         ${domain ? `<span class="domain">(${escapeHTML(domain)})</span>` : ""}
@@ -923,6 +1565,100 @@ function sanitizeHNHTML(value) {
   }
 
   return template.innerHTML;
+}
+
+const READER_SANITIZE_ALLOWED_TAGS = new Set([
+  "a",
+  "article",
+  "blockquote",
+  "br",
+  "code",
+  "em",
+  "figcaption",
+  "figure",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "img",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "section",
+  "small",
+  "strong",
+  "sub",
+  "sup",
+  "table",
+  "tbody",
+  "td",
+  "th",
+  "thead",
+  "tr",
+  "ul",
+]);
+
+const READER_SANITIZE_ATTRS = {
+  a: new Set(["href"]),
+  img: new Set(["src", "alt", "title"]),
+  td: new Set(["colspan", "rowspan"]),
+  th: new Set(["colspan", "rowspan"]),
+};
+
+function sanitizeReaderHTML(value, baseUrl) {
+  const template = document.createElement("template");
+  template.innerHTML = value ?? "";
+
+  const elements = Array.from(template.content.querySelectorAll("*"));
+  for (const element of elements) {
+    const tag = element.tagName.toLowerCase();
+    if (!READER_SANITIZE_ALLOWED_TAGS.has(tag)) {
+      unwrapElement(element);
+      continue;
+    }
+
+    const allowedAttrs = READER_SANITIZE_ATTRS[tag] ?? null;
+    Array.from(element.attributes).forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        return;
+      }
+      if (!allowedAttrs || !allowedAttrs.has(name)) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+
+    if (tag === "a") {
+      const safeHref = getSafeResolvedUrl(element.getAttribute("href"), baseUrl);
+      if (safeHref) {
+        element.setAttribute("href", safeHref);
+        element.setAttribute("target", "_blank");
+        element.setAttribute("rel", "noopener noreferrer");
+      } else {
+        element.removeAttribute("href");
+      }
+      continue;
+    }
+
+    if (tag === "img") {
+      const safeSrc = getSafeResolvedUrl(element.getAttribute("src"), baseUrl);
+      if (!safeSrc) {
+        element.remove();
+        continue;
+      }
+      element.setAttribute("src", safeSrc);
+      element.setAttribute("loading", "lazy");
+      element.setAttribute("decoding", "async");
+      element.setAttribute("referrerpolicy", "no-referrer");
+    }
+  }
+
+  return template.innerHTML.trim();
 }
 
 function renderStoryDetail(story) {
@@ -1337,6 +2073,7 @@ function wireCommentActions(state) {
 
 async function renderStoryPage(id) {
   const storyId = Number(id);
+  app.dataset.view = "story";
   if (!Number.isFinite(storyId)) {
     app.innerHTML = `
       ${topbar('<a class="btn" href="#/">back</a>')}
