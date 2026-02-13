@@ -6,13 +6,14 @@ const ITEM_CACHE_STORAGE_KEY = "hn-fork:item-cache:v1";
 const THEME_STORAGE_KEY = "hn-fork:theme:v1";
 const ITEM_CACHE_MAX_ENTRIES = 1200;
 const ITEM_CACHE_PERSIST_MAX_ENTRIES = 280;
-const COMMENTS_BATCH_SIZE = 20;
+const COMMENTS_BATCH_SIZE = 30;
 const COMMENTS_AUTO_RENDER_LIMIT = 200;
 const PREVIEW_HASH_PREFIX = "p=";
 const PREVIEW_BLOCK_TIMEOUT_MS = 2500;
 const PREVIEW_EMBED_BLOCKED_MESSAGE =
   "This site may block embedding. Use Open in new tab.";
 const READER_ENDPOINT = "/api/reader";
+const THREAD_ENDPOINT = "/api/thread";
 const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
 const THEME_TERMINAL = "terminal";
 const THEME_DARK = "dark";
@@ -962,6 +963,27 @@ async function fetchJSON(path, { signal } = {}) {
   return response.json();
 }
 
+async function fetchThread(id, { signal } = {}) {
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    throw new Error("Invalid story id.");
+  }
+
+  const response = await fetch(`${THREAD_ENDPOINT}?id=${numericId}`, { signal });
+  if (!response.ok) {
+    let message = `Thread request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload?.error) {
+        message = payload.error;
+      }
+    } catch {}
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
 async function mapWithConcurrency(items, limit, asyncFn, { signal } = {}) {
   if (!items.length) {
     return [];
@@ -1779,44 +1801,42 @@ function applyCommentDepth(element, depth) {
   element.style.setProperty("--comment-depth", String(safeDepth));
 }
 
-function createCommentLoadingElement(id, depth, message = "loading...") {
-  const article = document.createElement("article");
-  article.className = "comment comment-loading";
-  article.dataset.commentId = String(id);
-  applyCommentDepth(article, depth);
+function normalizeThreadComment(node) {
+  if (!node || typeof node !== "object") {
+    return null;
+  }
 
-  const meta = document.createElement("div");
-  meta.className = "comment-meta";
-  meta.textContent = message;
+  const id = Number(node.id);
+  if (!Number.isFinite(id)) {
+    return null;
+  }
 
-  article.appendChild(meta);
-  return article;
+  const time = Number(node.created_at_i);
+  const children = Array.isArray(node.children)
+    ? node.children
+        .map((child) => normalizeThreadComment(child))
+        .filter((child) => child)
+    : [];
+
+  return {
+    id,
+    by: typeof node.author === "string" && node.author ? node.author : "unknown",
+    time: Number.isFinite(time) ? time : 0,
+    text: typeof node.text === "string" ? node.text : "",
+    children,
+    deleted: Boolean(node.deleted),
+    dead: Boolean(node.dead),
+  };
 }
 
-function createCommentFailureElement(id, depth) {
-  const article = document.createElement("article");
-  article.className = "comment comment-failed";
-  article.dataset.commentId = String(id);
-  applyCommentDepth(article, depth);
+function normalizeThreadChildren(thread) {
+  if (!thread || typeof thread !== "object" || !Array.isArray(thread.children)) {
+    return [];
+  }
 
-  const meta = document.createElement("div");
-  meta.className = "comment-meta";
-  meta.textContent = "failed to load";
-
-  const actions = document.createElement("div");
-  actions.className = "comment-actions";
-
-  const retryButton = document.createElement("button");
-  retryButton.type = "button";
-  retryButton.className = "btn";
-  retryButton.dataset.action = "retry-comment";
-  retryButton.dataset.commentId = String(id);
-  retryButton.dataset.depth = String(depth);
-  retryButton.textContent = "failed to load - retry";
-
-  actions.appendChild(retryButton);
-  article.append(meta, actions);
-  return article;
+  return thread.children
+    .map((child) => normalizeThreadComment(child))
+    .filter((child) => child);
 }
 
 function createCommentRenderState({ signal, sectionEl, rootEl, statusEl }) {
@@ -1825,13 +1845,12 @@ function createCommentRenderState({ signal, sectionEl, rootEl, statusEl }) {
     sectionEl,
     rootEl,
     statusEl,
-    enqueueFetch: createTaskQueue(MAX_CONCURRENCY, { signal }),
+    enqueueRender: createTaskQueue(1, { signal }),
     childLists: new Map(),
     moreItems: new Map(),
     nextListId: 1,
     autoScheduledCount: 0,
     loadedCount: 0,
-    failedCount: 0,
   };
 }
 
@@ -1840,13 +1859,12 @@ function updateCommentStatus(state) {
     return;
   }
 
-  if (state.loadedCount === 0 && state.failedCount === 0) {
+  if (state.loadedCount === 0) {
     state.statusEl.textContent = "Loading comments...";
     return;
   }
 
-  const failedSuffix = state.failedCount ? `, ${state.failedCount} failed` : "";
-  state.statusEl.textContent = `Loaded ${state.loadedCount} comments${failedSuffix}`;
+  state.statusEl.textContent = `Loaded ${state.loadedCount} comments`;
 }
 
 function removeLoadMoreControl(model) {
@@ -1856,7 +1874,7 @@ function removeLoadMoreControl(model) {
   model.controlEl = null;
 }
 
-function renderLoadMoreControl(state, model, remaining) {
+function renderLoadMoreControl(model, remaining) {
   removeLoadMoreControl(model);
 
   if (remaining <= 0 || !model.container.isConnected) {
@@ -1878,53 +1896,10 @@ function renderLoadMoreControl(state, model, remaining) {
   model.controlEl = wrap;
 }
 
-function renderCommentResolved(state, slot, item, depth) {
-  const normalizedKids = normalizeIds(item?.kids);
-
-  if (item?.type === "more") {
-    const article = document.createElement("article");
-    article.className = "comment comment-more";
-    article.dataset.commentId = String(item.id ?? "");
-    applyCommentDepth(article, depth);
-
-    const meta = document.createElement("div");
-    meta.className = "comment-meta";
-    meta.textContent = `${normalizedKids.length || 0} more replies`;
-
-    const actions = document.createElement("div");
-    actions.className = "comment-actions";
-
-    const loadButton = document.createElement("button");
-    loadButton.type = "button";
-    loadButton.className = "btn";
-    loadButton.dataset.action = "load-more-item";
-    loadButton.dataset.commentId = String(item.id ?? "");
-    loadButton.textContent = "Load more";
-
-    actions.appendChild(loadButton);
-
-    const children = document.createElement("div");
-    children.className = "comment-children";
-
-    article.append(meta, actions, children);
-    slot.replaceWith(article);
-
-    state.moreItems.set(item.id, {
-      id: item.id,
-      kids: normalizedKids,
-      depth: depth + 1,
-      container: children,
-      loaded: false,
-    });
-
-    state.loadedCount += 1;
-    updateCommentStatus(state);
-    return;
-  }
-
+function createCommentElement(state, item, depth) {
   const article = document.createElement("article");
   article.className = "comment";
-  article.dataset.commentId = String(item?.id ?? "");
+  article.dataset.commentId = String(item.id);
   applyCommentDepth(article, depth);
 
   const meta = document.createElement("div");
@@ -1932,11 +1907,11 @@ function renderCommentResolved(state, slot, item, depth) {
 
   const bySpan = document.createElement("span");
   bySpan.className = "meta-user";
-  bySpan.textContent = item?.by ? `by ${item.by}` : "by unknown";
+  bySpan.textContent = item.by ? `by ${item.by}` : "by unknown";
 
   const timeSpan = document.createElement("span");
   timeSpan.className = "meta-time";
-  timeSpan.textContent = item?.time ? `${timeAgo(item.time)} ago` : "";
+  timeSpan.textContent = item.time ? `${timeAgo(item.time)} ago` : "";
 
   meta.append(bySpan);
   if (timeSpan.textContent) {
@@ -1957,58 +1932,83 @@ function renderCommentResolved(state, slot, item, depth) {
   const text = document.createElement("div");
   text.className = "comment-text";
 
-  if (item?.deleted) {
+  if (item.deleted) {
     text.textContent = "[deleted]";
-  } else if (item?.dead) {
+  } else if (item.dead) {
     text.textContent = "[dead]";
-  } else if (item?.text) {
+  } else if (item.text) {
     text.innerHTML = sanitizeHNHTML(item.text);
   } else {
-    text.textContent = "";
+    text.textContent = "[deleted]";
   }
 
   const children = document.createElement("div");
   children.className = "comment-children";
 
-  article.append(meta, actions, text, children);
-  slot.replaceWith(article);
+  const normalizedKids = Array.isArray(item.children)
+    ? item.children.filter((child) => child && Number.isFinite(child.id))
+    : [];
 
   if (normalizedKids.length) {
-    mountChildList(state, children, normalizedKids, depth + 1, { auto: true });
+    const repliesButton = document.createElement("button");
+    repliesButton.type = "button";
+    repliesButton.className = "btn";
+    repliesButton.dataset.action = "load-replies";
+    repliesButton.dataset.commentId = String(item.id);
+    repliesButton.textContent = `Show replies (${normalizedKids.length})`;
+    actions.appendChild(repliesButton);
+
+    state.moreItems.set(item.id, {
+      id: item.id,
+      kids: normalizedKids,
+      depth: depth + 1,
+      container: children,
+      loaded: false,
+    });
   }
 
-  state.loadedCount += 1;
-  updateCommentStatus(state);
+  article.append(meta, actions, text, children);
+  return article;
 }
 
-function fetchAndRenderComment(state, id, slot, depth, { forceRefresh = false } = {}) {
-  if (state.signal.aborted || !slot?.isConnected) {
-    return;
-  }
+function queueCommentBatchRender(state, model, items) {
+  return state
+    .enqueueRender(
+      () =>
+        new Promise((resolve, reject) => {
+          if (state.signal.aborted || !model.container?.isConnected) {
+            resolve();
+            return;
+          }
 
-  state
-    .enqueueFetch(() => getItem(id, { signal: state.signal, forceRefresh }))
-    .then((item) => {
-      if (state.signal.aborted || !slot.isConnected) {
-        return;
-      }
-      if (!item) {
-        const failed = createCommentFailureElement(id, depth);
-        slot.replaceWith(failed);
-        state.failedCount += 1;
-        updateCommentStatus(state);
-        return;
-      }
-      renderCommentResolved(state, slot, item, depth);
-    })
+          window.requestAnimationFrame(() => {
+            if (state.signal.aborted || !model.container?.isConnected) {
+              resolve();
+              return;
+            }
+
+            try {
+              const fragment = document.createDocumentFragment();
+
+              items.forEach((item) => {
+                fragment.appendChild(createCommentElement(state, item, model.depth));
+              });
+
+              model.container.appendChild(fragment);
+              state.loadedCount += items.length;
+              updateCommentStatus(state);
+
+              resolve();
+            } catch (error) {
+              reject(error);
+            }
+          });
+        }),
+    )
     .catch((error) => {
-      if (isAbortError(error) || state.signal.aborted || !slot.isConnected) {
-        return;
+      if (!isAbortError(error) && !state.signal.aborted) {
+        console.error("Failed to render comments batch.", error);
       }
-      const failed = createCommentFailureElement(id, depth);
-      slot.replaceWith(failed);
-      state.failedCount += 1;
-      updateCommentStatus(state);
     });
 }
 
@@ -2019,7 +2019,7 @@ function loadChildBatch(state, model, { manual = false } = {}) {
 
   removeLoadMoreControl(model);
 
-  const remaining = model.kidIds.length - model.nextIndex;
+  const remaining = model.items.length - model.nextIndex;
   if (remaining <= 0) {
     return;
   }
@@ -2031,35 +2031,33 @@ function loadChildBatch(state, model, { manual = false } = {}) {
   }
 
   if (count <= 0) {
-    renderLoadMoreControl(state, model, remaining);
+    renderLoadMoreControl(model, remaining);
     return;
   }
 
-  const fragment = document.createDocumentFragment();
-
-  for (let offset = 0; offset < count; offset += 1) {
-    const kidId = model.kidIds[model.nextIndex + offset];
-    const slot = createCommentLoadingElement(kidId, model.depth);
-    fragment.appendChild(slot);
-    fetchAndRenderComment(state, kidId, slot, model.depth);
-  }
+  const batch = model.items.slice(model.nextIndex, model.nextIndex + count);
 
   model.nextIndex += count;
   if (model.auto && !manual) {
     state.autoScheduledCount += count;
   }
 
-  model.container.appendChild(fragment);
-
-  const remainingAfter = model.kidIds.length - model.nextIndex;
-  if (remainingAfter > 0) {
-    renderLoadMoreControl(state, model, remainingAfter);
-  }
+  void queueCommentBatchRender(state, model, batch).then(() => {
+    if (state.signal.aborted || !model.container?.isConnected) {
+      return;
+    }
+    const remainingAfter = model.items.length - model.nextIndex;
+    if (remainingAfter > 0) {
+      renderLoadMoreControl(model, remainingAfter);
+    }
+  });
 }
 
-function mountChildList(state, container, kidIds, depth, { auto = true } = {}) {
-  const normalizedKids = normalizeIds(kidIds);
-  if (!normalizedKids.length || !container?.isConnected) {
+function mountChildList(state, container, comments, depth, { auto = true } = {}) {
+  const normalizedComments = Array.isArray(comments)
+    ? comments.filter((comment) => comment && Number.isFinite(comment.id))
+    : [];
+  if (!normalizedComments.length || !container?.isConnected) {
     return;
   }
 
@@ -2069,7 +2067,7 @@ function mountChildList(state, container, kidIds, depth, { auto = true } = {}) {
   const model = {
     id: listId,
     container,
-    kidIds: normalizedKids,
+    items: normalizedComments,
     nextIndex: 0,
     depth,
     auto,
@@ -2109,15 +2107,13 @@ function wireCommentActions(state) {
       if (!Number.isFinite(commentId)) {
         return;
       }
-      const moreModel = state.moreItems.get(commentId);
-      if (!moreModel || moreModel.loaded) {
+      const model = state.moreItems.get(commentId);
+      if (!model || model.loaded) {
         return;
       }
 
-      moreModel.loaded = true;
-      mountChildList(state, moreModel.container, moreModel.kids, moreModel.depth, {
-        auto: false,
-      });
+      model.loaded = true;
+      mountChildList(state, model.container, model.kids, model.depth, { auto: false });
 
       const actionWrap = actionEl.closest(".comment-actions");
       if (actionWrap) {
@@ -2126,25 +2122,15 @@ function wireCommentActions(state) {
       return;
     }
 
-    if (action === "retry-comment") {
-      const current = actionEl.closest(".comment");
-      if (!current) {
-        return;
-      }
+    if (action === "load-replies") {
+      const commentId = Number(actionEl.getAttribute("data-comment-id"));
+      if (!Number.isFinite(commentId)) return;
+      const model = state.moreItems.get(commentId);
+      if (!model || model.loaded) return;
 
-      const commentId = Number(
-        actionEl.getAttribute("data-comment-id") || current.getAttribute("data-comment-id"),
-      );
-      const depth = Number(
-        actionEl.getAttribute("data-depth") || current.getAttribute("data-depth") || 0,
-      );
-      if (!Number.isFinite(commentId)) {
-        return;
-      }
-
-      const loading = createCommentLoadingElement(commentId, depth, "retrying...");
-      current.replaceWith(loading);
-      fetchAndRenderComment(state, commentId, loading, depth, { forceRefresh: true });
+      model.loaded = true;
+      mountChildList(state, model.container, model.kids, model.depth, { auto: false });
+      actionEl.remove();
       return;
     }
 
@@ -2234,12 +2220,6 @@ async function renderStoryPage(id) {
     detailSlot.replaceWith(renderedStory);
   }
 
-  const kidIds = normalizeIds(story.kids);
-  if (!kidIds.length) {
-    commentsStatus.textContent = "No comments yet.";
-    return;
-  }
-
   const commentState = createCommentRenderState({
     signal: controller.signal,
     sectionEl: commentsSection,
@@ -2248,7 +2228,34 @@ async function renderStoryPage(id) {
   });
 
   wireCommentActions(commentState);
-  mountChildList(commentState, commentState.rootEl, kidIds, 0, { auto: true });
+
+  let thread = null;
+  try {
+    thread = await fetchThread(story.id || storyId, { signal: controller.signal });
+  } catch (error) {
+    if (
+      isAbortError(error) ||
+      controller.signal.aborted ||
+      currentViewController !== controller
+    ) {
+      return;
+    }
+
+    commentsStatus.textContent = "Could not load comments.";
+    return;
+  }
+
+  if (controller.signal.aborted || currentViewController !== controller) {
+    return;
+  }
+
+  const threadComments = normalizeThreadChildren(thread);
+  if (!threadComments.length) {
+    commentsStatus.textContent = "No comments yet.";
+    return;
+  }
+
+  mountChildList(commentState, commentState.rootEl, threadComments, 0, { auto: true });
 }
 
 document.addEventListener("click", (event) => {

@@ -486,10 +486,12 @@ iframe {
 }
 
 .shell.is-preview-open .preview-pane {
-  position: relative;
+  position: sticky;
+  top: 16px;
   inset: auto;
   width: 100%;
   height: calc(100vh - 32px);
+  max-height: calc(100vh - 32px);
   min-width: 0;
   z-index: auto;
 }
@@ -777,6 +779,17 @@ iframe {
       0 14px 40px rgba(0, 0, 0, 0.5);
   }
 
+  .shell.is-preview-open .preview-pane {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    min-width: 0;
+    z-index: 80;
+    transform: translateY(16px);
+  }
+
   .shell.is-preview-open .list-pane {
     width: 100%;
     margin: 0;
@@ -789,14 +802,13 @@ iframe {
   }
 
   .preview-pane {
-    position: fixed;
-    inset: 0;
-    width: 100vw;
-    height: 100dvh;
-    transform: translateY(16px);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
   }
 
-  .preview-pane.is-open {
+  .shell.is-preview-open .preview-pane.is-open {
     transform: translateY(0);
   }
 
