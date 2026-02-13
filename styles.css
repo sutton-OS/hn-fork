@@ -134,7 +134,7 @@
   font-display: swap;
 }
 
-:root[data-theme="bloomberg"] {
+:root[data-theme="dark"] {
   --bg: #0f1113;
   --surface: #161a1e;
   --elevated: #1d2227;
@@ -149,15 +149,15 @@
   --c-orange: var(--muted);
   --c-green: var(--muted);
   --c-yellow: var(--text);
-  --bb-link-underline: rgba(240, 242, 245, 0.35);
-  --bb-link-underline-hover: rgba(240, 242, 245, 0.85);
-  --bb-panel-highlight: rgba(255, 255, 255, 0.03);
-  --bb-story-hover-bg: rgba(255, 255, 255, 0.05);
-  --bb-story-hover-ring: rgba(255, 255, 255, 0.1);
-  --bb-reader-body: rgba(240, 242, 245, 0.9);
+  --theme-link-underline: rgba(240, 242, 245, 0.35);
+  --theme-link-underline-hover: rgba(240, 242, 245, 0.85);
+  --theme-panel-highlight: rgba(255, 255, 255, 0.03);
+  --theme-story-hover-bg: rgba(255, 255, 255, 0.05);
+  --theme-story-hover-ring: rgba(255, 255, 255, 0.1);
+  --theme-reader-body: rgba(240, 242, 245, 0.9);
 }
 
-:root[data-theme="bloomberg-light"] {
+:root[data-theme="light"] {
   --bg: #fff;
   --surface: #fff;
   --elevated: #fff;
@@ -172,12 +172,12 @@
   --c-orange: var(--muted);
   --c-green: var(--muted);
   --c-yellow: var(--text);
-  --bb-link-underline: rgba(0, 0, 0, 0.35);
-  --bb-link-underline-hover: rgba(0, 0, 0, 0.85);
-  --bb-panel-highlight: rgba(0, 0, 0, 0.04);
-  --bb-story-hover-bg: rgba(0, 0, 0, 0.05);
-  --bb-story-hover-ring: rgba(0, 0, 0, 0.12);
-  --bb-reader-body: rgba(0, 0, 0, 0.9);
+  --theme-link-underline: rgba(0, 0, 0, 0.35);
+  --theme-link-underline-hover: rgba(0, 0, 0, 0.85);
+  --theme-panel-highlight: rgba(0, 0, 0, 0.04);
+  --theme-story-hover-bg: rgba(0, 0, 0, 0.05);
+  --theme-story-hover-ring: rgba(0, 0, 0, 0.12);
+  --theme-reader-body: rgba(0, 0, 0, 0.9);
 }
 
 *,
@@ -682,81 +682,81 @@ iframe {
   color: #9ab6ff;
 }
 
-:root[data-theme^="bloomberg"] a {
+:root:is([data-theme="dark"], [data-theme="light"]) a {
   color: var(--link);
-  text-decoration-color: var(--bb-link-underline);
+  text-decoration-color: var(--theme-link-underline);
 }
 
-:root[data-theme^="bloomberg"] a:hover {
-  text-decoration-color: var(--bb-link-underline-hover);
+:root:is([data-theme="dark"], [data-theme="light"]) a:hover {
+  text-decoration-color: var(--theme-link-underline-hover);
 }
 
-:root[data-theme^="bloomberg"] .story-title a,
-:root[data-theme^="bloomberg"] .preview-title,
-:root[data-theme^="bloomberg"] .preview-reader-title {
+:root:is([data-theme="dark"], [data-theme="light"]) .story-title a,
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-title,
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-reader-title {
   color: var(--text);
 }
 
-:root[data-theme^="bloomberg"] .story-title,
-:root[data-theme^="bloomberg"] .story-title a {
+:root:is([data-theme="dark"], [data-theme="light"]) .story-title,
+:root:is([data-theme="dark"], [data-theme="light"]) .story-title a {
   font-family: "Neue Haas Grotesk Display Pro", "Helvetica Neue", Helvetica, Arial,
     sans-serif;
   font-weight: 500;
   font-style: normal;
 }
 
-:root[data-theme^="bloomberg"] #app,
-:root[data-theme^="bloomberg"] .shell.is-preview-open,
-:root[data-theme^="bloomberg"] .shell.is-preview-open .list-pane {
+:root:is([data-theme="dark"], [data-theme="light"]) #app,
+:root:is([data-theme="dark"], [data-theme="light"]) .shell.is-preview-open,
+:root:is([data-theme="dark"], [data-theme="light"]) .shell.is-preview-open .list-pane {
   border-color: var(--line);
   background:
-    linear-gradient(180deg, var(--bb-panel-highlight), rgba(255, 255, 255, 0) 28%),
+    linear-gradient(180deg, var(--theme-panel-highlight), rgba(255, 255, 255, 0) 28%),
     var(--surface);
 }
 
-:root[data-theme^="bloomberg"] .preview-card {
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-card {
   border-color: var(--line);
   background:
-    linear-gradient(180deg, var(--bb-panel-highlight), rgba(255, 255, 255, 0) 28%),
+    linear-gradient(180deg, var(--theme-panel-highlight), rgba(255, 255, 255, 0) 28%),
     var(--elevated);
 }
 
-:root[data-theme^="bloomberg"] .preview-frame-wrap,
-:root[data-theme^="bloomberg"] .preview-frame,
-:root[data-theme^="bloomberg"] .preview-reader {
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-frame-wrap,
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-frame,
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-reader {
   background: var(--bg);
 }
 
-:root[data-theme^="bloomberg"] .preview-reader-body {
-  color: var(--bb-reader-body);
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-reader-body {
+  color: var(--theme-reader-body);
 }
 
-:root[data-theme^="bloomberg"] .preview-loading,
-:root[data-theme^="bloomberg"] .preview-fallback {
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-loading,
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-fallback {
   border-color: var(--line);
   background: var(--surface);
   color: var(--muted);
 }
 
-:root[data-theme^="bloomberg"] .preview-fallback[data-kind="warning"] {
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-fallback[data-kind="warning"] {
   border-color: var(--line);
   color: var(--muted);
 }
 
-:root[data-theme^="bloomberg"] .story-list .story {
+:root:is([data-theme="dark"], [data-theme="light"]) .story-list .story {
   border-bottom-color: var(--line);
 }
 
-:root[data-theme^="bloomberg"] .story-list .story:hover,
-:root[data-theme^="bloomberg"] .story-list .story:focus-within,
-:root[data-theme^="bloomberg"] .story-list .story.is-selected {
-  background: var(--bb-story-hover-bg);
-  box-shadow: inset 0 0 0 1px var(--bb-story-hover-ring);
+:root:is([data-theme="dark"], [data-theme="light"]) .story-list .story:hover,
+:root:is([data-theme="dark"], [data-theme="light"]) .story-list .story:focus-within,
+:root:is([data-theme="dark"], [data-theme="light"]) .story-list .story.is-selected {
+  background: var(--theme-story-hover-bg);
+  box-shadow: inset 0 0 0 1px var(--theme-story-hover-ring);
 }
 
-:root[data-theme^="bloomberg"] .story-list .story:hover::before,
-:root[data-theme^="bloomberg"] .story-list .story:focus-within::before,
-:root[data-theme^="bloomberg"] .story-list .story.is-selected::before {
+:root:is([data-theme="dark"], [data-theme="light"]) .story-list .story:hover::before,
+:root:is([data-theme="dark"], [data-theme="light"]) .story-list .story:focus-within::before,
+:root:is([data-theme="dark"], [data-theme="light"]) .story-list .story.is-selected::before {
   color: var(--muted);
 }
 

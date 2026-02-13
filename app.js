@@ -15,9 +15,9 @@ const PREVIEW_EMBED_BLOCKED_MESSAGE =
 const READER_ENDPOINT = "/api/reader";
 const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
 const THEME_TERMINAL = "terminal";
-const THEME_BLOOMBERG = "bloomberg";
-const THEME_BLOOMBERG_LIGHT = "bloomberg-light";
-const THEMES = [THEME_TERMINAL, THEME_BLOOMBERG, THEME_BLOOMBERG_LIGHT];
+const THEME_DARK = "dark";
+const THEME_LIGHT = "light";
+const THEMES = [THEME_TERMINAL, THEME_DARK, THEME_LIGHT];
 const app = document.getElementById("app");
 app?.classList.add("shell");
 
@@ -150,6 +150,12 @@ function escapeHTML(value) {
 }
 
 function normalizeTheme(theme) {
+  if (theme === "bloomberg") {
+    return THEME_DARK;
+  }
+  if (theme === "bloomberg-light") {
+    return THEME_LIGHT;
+  }
   return THEMES.includes(theme) ? theme : THEME_TERMINAL;
 }
 
@@ -169,20 +175,20 @@ function saveTheme(theme) {
 }
 
 function getThemeLabel(theme = currentTheme) {
-  if (theme === THEME_BLOOMBERG) {
-    return "Theme: Bloomberg";
+  if (theme === THEME_DARK) {
+    return "Dark";
   }
-  if (theme === THEME_BLOOMBERG_LIGHT) {
-    return "Theme: Bloomberg Light";
+  if (theme === THEME_LIGHT) {
+    return "Light";
   }
-  return "Theme: Terminal";
+  return "Terminal";
 }
 
 function updateThemeToggleLabels() {
   const label = getThemeLabel();
   app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
     button.textContent = label;
-    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-label", `Theme: ${label}`);
   });
 }
 
