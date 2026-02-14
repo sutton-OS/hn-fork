@@ -4,6 +4,7 @@ const MAX_CONCURRENCY = 8;
 const ITEM_TTL_MS = 3 * 60 * 1000;
 const ITEM_CACHE_STORAGE_KEY = "hn-fork:item-cache:v1";
 const THEME_STORAGE_KEY = "hn-fork:theme:v1";
+const FEED_STORAGE_KEY = "hn-fork:feed:v1";
 const ITEM_CACHE_MAX_ENTRIES = 1200;
 const ITEM_CACHE_PERSIST_MAX_ENTRIES = 280;
 const COMMENTS_BATCH_SIZE = 30;
@@ -19,11 +20,17 @@ const THEME_TERMINAL = "terminal";
 const THEME_DARK = "dark";
 const THEME_LIGHT = "light";
 const THEMES = [THEME_TERMINAL, THEME_DARK, THEME_LIGHT];
+const FEED_BEST = "best";
+const FEED_TOP = "top";
+const FEED_NEW = "new";
+const FEEDS = [FEED_BEST, FEED_TOP, FEED_NEW];
 const app = document.getElementById("app");
 app?.classList.add("shell");
 
 const store = {
   bestStoryIds: [],
+  topStoryIds: [],
+  newStoryIds: [],
   itemCache: new Map(),
   itemCacheLoaded: false,
 };
@@ -35,6 +42,7 @@ let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
 let activeListPage = 1;
 let currentTheme = THEME_TERMINAL;
+let currentFeed = FEED_BEST;
 const previewState = {
   activeUrl: "",
   loadToken: 0,
@@ -45,6 +53,7 @@ const previewState = {
 let readabilityModulePromise = null;
 
 applyTheme(loadSavedTheme());
+applyFeed(loadSavedFeed());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("load", handleRouteChange);
 document.addEventListener("keydown", handleGlobalKeydown);
@@ -160,6 +169,10 @@ function normalizeTheme(theme) {
   return THEMES.includes(theme) ? theme : THEME_TERMINAL;
 }
 
+function normalizeFeed(feed) {
+  return FEEDS.includes(feed) ? feed : FEED_BEST;
+}
+
 function loadSavedTheme() {
   try {
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
@@ -169,9 +182,24 @@ function loadSavedTheme() {
   }
 }
 
+function loadSavedFeed() {
+  try {
+    const saved = localStorage.getItem(FEED_STORAGE_KEY);
+    return normalizeFeed(saved);
+  } catch {
+    return FEED_BEST;
+  }
+}
+
 function saveTheme(theme) {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, normalizeTheme(theme));
+  } catch {}
+}
+
+function saveFeed(feed) {
+  try {
+    localStorage.setItem(FEED_STORAGE_KEY, normalizeFeed(feed));
   } catch {}
 }
 
@@ -185,11 +213,29 @@ function getThemeLabel(theme = currentTheme) {
   return "Terminal";
 }
 
+function getFeedLabel(feed = currentFeed) {
+  if (feed === FEED_TOP) {
+    return "Top";
+  }
+  if (feed === FEED_NEW) {
+    return "New";
+  }
+  return "Best";
+}
+
 function updateThemeToggleLabels() {
   const label = getThemeLabel();
   app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
     button.textContent = label;
     button.setAttribute("aria-label", `Theme: ${label}`);
+  });
+}
+
+function updateFeedToggleLabels() {
+  const label = getFeedLabel();
+  app.querySelectorAll("[data-feed-toggle]").forEach((button) => {
+    button.textContent = label;
+    button.setAttribute("aria-label", `Feed: ${label}`);
   });
 }
 
@@ -202,11 +248,38 @@ function applyTheme(theme, { persist = false } = {}) {
   updateThemeToggleLabels();
 }
 
+function applyFeed(feed, { persist = false } = {}) {
+  currentFeed = normalizeFeed(feed);
+  if (persist) {
+    saveFeed(currentFeed);
+  }
+  updateFeedToggleLabels();
+}
+
 function toggleTheme() {
   const currentIndex = THEMES.indexOf(currentTheme);
   const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % THEMES.length : 0;
   const next = THEMES[nextIndex];
   applyTheme(next, { persist: true });
+}
+
+function rerenderListForFeedChange() {
+  if (app.dataset.view !== "list") {
+    return;
+  }
+  activeListPage = 0;
+  if (window.location.hash !== "#/page/1") {
+    window.location.hash = "/page/1";
+    return;
+  }
+  void renderRoute({ type: "list", page: 1 });
+}
+
+function toggleFeed() {
+  const currentIndex = FEEDS.indexOf(currentFeed);
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % FEEDS.length : 0;
+  applyFeed(FEEDS[nextIndex], { persist: true });
+  rerenderListForFeedChange();
 }
 
 function wireThemeToggleButtons(root = app) {
@@ -220,6 +293,19 @@ function wireThemeToggleButtons(root = app) {
     });
   });
   updateThemeToggleLabels();
+}
+
+function wireFeedToggleButtons(root = app) {
+  root.querySelectorAll("[data-feed-toggle]").forEach((button) => {
+    if (button.dataset.feedWired) {
+      return;
+    }
+    button.dataset.feedWired = "true";
+    button.addEventListener("click", () => {
+      toggleFeed();
+    });
+  });
+  updateFeedToggleLabels();
 }
 
 function createAbortError() {
@@ -1080,6 +1166,34 @@ async function getBestStoryIds({ signal } = {}) {
   return store.bestStoryIds;
 }
 
+async function getTopStoryIds({ signal } = {}) {
+  if (store.topStoryIds.length) {
+    return store.topStoryIds;
+  }
+  const ids = await fetchJSON("topstories.json", { signal });
+  store.topStoryIds = Array.isArray(ids) ? ids : [];
+  return store.topStoryIds;
+}
+
+async function getNewStoryIds({ signal } = {}) {
+  if (store.newStoryIds.length) {
+    return store.newStoryIds;
+  }
+  const ids = await fetchJSON("newstories.json", { signal });
+  store.newStoryIds = Array.isArray(ids) ? ids : [];
+  return store.newStoryIds;
+}
+
+async function getStoryIdsForCurrentFeed({ signal } = {}) {
+  if (currentFeed === FEED_TOP) {
+    return getTopStoryIds({ signal });
+  }
+  if (currentFeed === FEED_NEW) {
+    return getNewStoryIds({ signal });
+  }
+  return getBestStoryIds({ signal });
+}
+
 function pruneItemCache() {
   const now = Date.now();
   const alive = [];
@@ -1290,6 +1404,9 @@ function topbar(content) {
       <a class="brand" href="#/">HNx</a>
       <div class="topbar-actions">
         ${rightContent}
+        <button class="btn feed-toggle" type="button" data-feed-toggle>
+          ${getFeedLabel()}
+        </button>
         <button class="btn theme-toggle" type="button" data-theme-toggle>
           ${getThemeLabel()}
         </button>
@@ -1318,7 +1435,7 @@ function createLoadingRow(index, message = "loading...") {
   const row = document.createElement("article");
   row.className = "story";
   row.innerHTML = `
-    <div class="story-title">${index}. ${message}</div>
+    <div class="story-title"><span class="story-rank">${index}.</span><span class="story-title-text">${message}</span></div>
     <div class="story-meta"><span>fetching story details...</span></div>
   `;
   return row;
@@ -1342,7 +1459,7 @@ function renderLoadingRows(listEl, count, startIndex) {
 function renderFailedStoryRow(id, index, slotIndex) {
   return `
     <article class="story" data-slot="${slotIndex}">
-      <div class="story-title">${index}. failed to load</div>
+      <div class="story-title"><span class="story-rank">${index}.</span><span class="story-title-text">failed to load</span></div>
       <div class="story-meta">
         <span>item ${id}</span>
         <span><button class="btn" type="button" data-retry-id="${id}" data-retry-slot="${slotIndex}">retry</button></span>
@@ -1402,6 +1519,7 @@ async function renderListPage(page) {
       </aside>
     `;
     wireThemeToggleButtons();
+    wireFeedToggleButtons();
 
     const listEl = app.querySelector(".story-list");
     if (!listEl) {
@@ -1429,7 +1547,7 @@ async function renderListPage(page) {
     initializeListSelection(listEl);
     applyListRoute(parseRoute());
 
-    const ids = await getBestStoryIds({ signal: controller.signal });
+    const ids = await getStoryIdsForCurrentFeed({ signal: controller.signal });
     if (controller.signal.aborted || currentViewController !== controller) {
       return;
     }
@@ -1446,6 +1564,7 @@ async function renderListPage(page) {
       currentTopbar.replaceWith(nextTopbar);
       wirePagination();
       wireThemeToggleButtons();
+      wireFeedToggleButtons();
     }
 
     if (!pageIds.length) {
@@ -1593,7 +1712,7 @@ function renderStoryRow(story, index) {
       data-preview-title="${escapeHTML(storyTitleRaw)}"
       data-preview-domain="${escapeHTML(previewDomain)}"
       data-story-id="${story.id}"
-    >${index}. ${storyTitle}</a>
+    ><span class="story-rank">${index}.</span><span class="story-title-text">${storyTitle}</span></a>
   `;
 
   return `
@@ -2163,6 +2282,7 @@ async function renderStoryPage(id) {
       <p class="status">Invalid story id.</p>
     `;
     wireThemeToggleButtons();
+    wireFeedToggleButtons();
     return;
   }
 
@@ -2182,6 +2302,7 @@ async function renderStoryPage(id) {
     </section>
   `;
   wireThemeToggleButtons();
+  wireFeedToggleButtons();
 
   const detailSlot = app.querySelector(".story-detail");
   const commentsSection = app.querySelector(".comments");

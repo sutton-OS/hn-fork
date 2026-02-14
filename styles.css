@@ -4,7 +4,9 @@
   --elevated: rgba(8, 8, 8, 0.94);
   --text: #d1d1d1;
   --muted: #9f9f9f;
-  --line: #1f1f1f;
+  --line: rgba(255, 255, 255, 0.14);
+  --line-width: 0.5px;
+  --line-width-strong: 0.75px;
   --link: #d1d1d1;
   --font-family: "Berkeley Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, "Liberation Mono", monospace;
@@ -139,7 +141,7 @@
   --bg: #0f1113;
   --surface: #161a1e;
   --elevated: #1d2227;
-  --line: #2e3236;
+  --line: rgba(240, 242, 245, 0.14);
   --text: #f0f2f5;
   --muted: #b7bdc6;
   --link: var(--text);
@@ -163,7 +165,7 @@
   --bg: #fff;
   --surface: #fff;
   --elevated: #fff;
-  --line: #1f1f1f;
+  --line: rgba(0, 0, 0, 0.14);
   --text: #000;
   --muted: #333;
   --link: var(--text);
@@ -252,7 +254,7 @@ a:hover {
 }
 
 .story {
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--line-width) solid var(--line);
   padding-bottom: 8px;
 }
 
@@ -263,6 +265,12 @@ a:hover {
 
 .story-title a {
   color: #fff;
+}
+
+.story-rank {
+  color: var(--c-red);
+  display: inline-block;
+  margin-right: 0.65ch;
 }
 
 .story-meta {
@@ -300,7 +308,7 @@ a:hover {
 }
 
 .btn {
-  border: 1px solid var(--line);
+  border: var(--line-width) solid var(--line);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -329,7 +337,7 @@ a:hover {
 }
 
 .story-detail {
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--line-width) solid var(--line);
   margin-bottom: 12px;
   padding-bottom: 10px;
 }
@@ -363,7 +371,7 @@ a:hover {
 .comment {
   --comment-depth: 0;
   width: 100%;
-  border-left: 1px solid var(--line);
+  border-left: var(--line-width) solid var(--line);
   padding: 5px 0 0 clamp(0px, calc(var(--comment-depth) * 12px), 132px);
 }
 
@@ -424,7 +432,7 @@ iframe {
 }
 
 #app {
-  border: 1px solid #262626;
+  border: var(--line-width-strong) solid var(--line);
   border-radius: 8px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
@@ -462,7 +470,7 @@ iframe {
   justify-self: center;
   margin: 0;
   padding: 16px 12px 40px;
-  border: 1px solid #262626;
+  border: var(--line-width-strong) solid var(--line);
   border-radius: 8px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
@@ -503,7 +511,7 @@ iframe {
 
 .preview-card {
   height: 100%;
-  border: 1px solid #262626;
+  border: var(--line-width-strong) solid var(--line);
   border-radius: 10px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
@@ -520,7 +528,7 @@ iframe {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--line-width) solid var(--line);
 }
 
 .preview-heading {
@@ -581,7 +589,7 @@ iframe {
   right: 12px;
   margin: 0;
   padding: 8px 10px;
-  border: 1px solid #2a2a2a;
+  border: var(--line-width) solid var(--line);
   border-radius: 6px;
   background: rgba(8, 8, 8, 0.92);
   color: var(--muted);
@@ -655,7 +663,7 @@ iframe {
   position: relative;
   margin: 0 -12px;
   padding: 9px 12px 10px 28px;
-  border-bottom: 1px solid #1a1a1a;
+  border-bottom: var(--line-width) solid var(--line);
   transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 
@@ -766,7 +774,7 @@ iframe {
     max-width: calc(92ch * var(--bloomberg-scale));
     margin: 0 auto;
     padding: 16px 12px 40px;
-    border: 1px solid var(--line);
+    border: var(--line-width-strong) solid var(--line);
     border-radius: 8px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
