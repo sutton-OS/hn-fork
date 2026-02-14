@@ -426,9 +426,7 @@ iframe {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
     rgba(8, 8, 8, 0.92);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 14px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
 }
 
 .list-pane {
@@ -466,9 +464,7 @@ iframe {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
     rgba(8, 8, 8, 0.92);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 14px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
   transform: translateX(0);
 }
 
@@ -509,9 +505,7 @@ iframe {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
     rgba(8, 8, 8, 0.94);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 20px 55px rgba(0, 0, 0, 0.55);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -774,9 +768,7 @@ iframe {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 28%),
       var(--surface);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.04),
-      0 14px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: none;
   }
 
   .shell.is-preview-open .preview-pane {
