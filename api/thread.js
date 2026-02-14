@@ -1,5 +1,5 @@
 const THREAD_TIMEOUT_MS = 8000;
-const THREAD_CACHE_CONTROL = "public, s-maxage=300, stale-while-revalidate=86400";
+const THREAD_CACHE_CONTROL = "s-maxage=60, stale-while-revalidate=600";
 
 function sendJSON(res, status, payload) {
   res.status(status);
@@ -37,7 +37,7 @@ module.exports = async function handler(req, res) {
     });
 
     if (!upstream.ok) {
-      sendJSON(res, 502, { error: `Upstream request failed (${upstream.status}).` });
+      sendJSON(res, upstream.status, { error: `Upstream request failed (${upstream.status}).` });
       return;
     }
 

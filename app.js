@@ -981,6 +981,15 @@ async function fetchThread(id, { signal } = {}) {
     throw new Error(message);
   }
 
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    const body = await response.text();
+    const preview = body.slice(0, 200);
+    throw new Error(
+      `Thread endpoint returned non-JSON content (${contentType || "unknown"}): ${preview}`,
+    );
+  }
+
   return response.json();
 }
 
