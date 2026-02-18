@@ -332,25 +332,22 @@ a:hover {
   align-items: center;
   justify-content: center;
   min-height: 28px;
-  border: var(--line-width) solid var(--line);
+  border: 1px solid rgba(255, 255, 255, 0.33);
   border-radius: 999px;
   padding: 4px 10px;
   overflow: hidden;
   isolation: isolate;
-  background:
-    linear-gradient(140deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.06)),
-    rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px) saturate(130%);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.15));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 6px 16px rgba(0, 0, 0, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 8px 22px rgba(0, 0, 0, 0.24);
   transition: box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
 }
 
 .theme-toggle:hover {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.34),
-    0 8px 20px rgba(0, 0, 0, 0.24);
+    inset 0 1px 0 rgba(255, 255, 255, 0.56),
+    0 10px 24px rgba(0, 0, 0, 0.28);
 }
 
 .theme-toggle:focus-visible {
@@ -362,11 +359,9 @@ a:hover {
 
 :root[data-theme="light"] .theme-toggle {
   border-color: rgba(0, 0, 0, 0.12);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.6)),
-    rgba(255, 255, 255, 0.72);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(246, 246, 246, 0.66));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
     0 8px 16px rgba(0, 0, 0, 0.1);
 }
 
@@ -761,6 +756,27 @@ iframe {
   background: #0b0b0b;
 }
 
+.preview-comments {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 12px 14px 22px;
+  background: #0b0b0b;
+}
+
+.preview-comments .story-detail {
+  margin-bottom: 10px;
+  padding-bottom: 9px;
+}
+
+.preview-comments .comments-title {
+  margin-bottom: 6px;
+}
+
+.preview-comments .comment {
+  padding-left: clamp(0px, calc(var(--comment-depth) * 10px), 88px);
+}
+
 .preview-reader-article {
   max-width: 72ch;
   margin: 0 auto;
@@ -874,7 +890,8 @@ iframe {
 
 :root:is([data-theme="dark"], [data-theme="light"]) .preview-frame-wrap,
 :root:is([data-theme="dark"], [data-theme="light"]) .preview-frame,
-:root:is([data-theme="dark"], [data-theme="light"]) .preview-reader {
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-reader,
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-comments {
   background: var(--bg);
 }
 

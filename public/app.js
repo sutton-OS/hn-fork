@@ -37,9 +37,11 @@ const previewState = {
   loadToken: 0,
   blockedTimer: null,
   readerController: null,
+  commentsController: null,
   mode: "embed",
 };
 let readabilityModulePromise = null;
+const commentActionHandlers = new WeakMap();
 const preloadedStoriesState = readPreloadedStories();
 
 applyTheme(loadSavedTheme());
@@ -382,6 +384,13 @@ function abortCurrentViewLoad() {
     currentViewController.abort();
     currentViewController = null;
   }
+  clearPreviewBlockedTimer();
+  clearPreviewReaderController();
+  clearPreviewCommentsController();
+  previewState.loadToken += 1;
+  previewState.activeUrl = "";
+  previewState.mode = "embed";
+  app.classList.remove("is-preview-open");
 }
 
 function navigateTo(pathname) {
@@ -416,6 +425,13 @@ function clearPreviewReaderController() {
   }
 }
 
+function clearPreviewCommentsController() {
+  if (previewState.commentsController) {
+    previewState.commentsController.abort();
+    previewState.commentsController = null;
+  }
+}
+
 function getPreviewElements() {
   const pane = app.querySelector("[data-preview-pane]");
   if (!pane) {
@@ -430,6 +446,11 @@ function getPreviewElements() {
   const iframe = pane.querySelector("[data-preview-frame]");
   const loading = pane.querySelector("[data-preview-loading]");
   const reader = pane.querySelector("[data-preview-reader-content]");
+  const commentsPanel = pane.querySelector("[data-preview-comments]");
+  const commentsSection = pane.querySelector("[data-preview-comments-section]");
+  const commentsStory = pane.querySelector("[data-preview-comments-story]");
+  const commentsRoot = pane.querySelector("[data-preview-comments-root]");
+  const commentsStatus = pane.querySelector("[data-preview-comments-status]");
   const fallback = pane.querySelector("[data-preview-fallback]");
 
   if (
@@ -441,6 +462,11 @@ function getPreviewElements() {
     !iframe ||
     !loading ||
     !reader ||
+    !commentsPanel ||
+    !commentsSection ||
+    !commentsStory ||
+    !commentsRoot ||
+    !commentsStatus ||
     !fallback
   ) {
     return null;
@@ -456,6 +482,11 @@ function getPreviewElements() {
     iframe,
     loading,
     reader,
+    commentsPanel,
+    commentsSection,
+    commentsStory,
+    commentsRoot,
+    commentsStatus,
     fallback,
   };
 }
@@ -516,15 +547,26 @@ function setPreviewLoadingVisible(elements, visible, message = "Loading preview.
 }
 
 function setPreviewMode(elements, mode) {
-  const normalizedMode = mode === "reader" ? "reader" : "embed";
+  const normalizedMode =
+    mode === "reader" || mode === "comments" ? mode : "embed";
   previewState.mode = normalizedMode;
   elements.reader.hidden = normalizedMode !== "reader";
-  elements.iframe.hidden = normalizedMode === "reader";
-  elements.readerButton.setAttribute("aria-pressed", normalizedMode === "reader" ? "true" : "false");
+  elements.commentsPanel.hidden = normalizedMode !== "comments";
+  elements.iframe.hidden = normalizedMode !== "embed";
+  elements.readerButton.hidden = normalizedMode === "comments";
+  elements.readerButton.setAttribute(
+    "aria-pressed",
+    normalizedMode === "reader" ? "true" : "false",
+  );
   elements.readerButton.textContent = normalizedMode === "reader" ? "Web View" : "Reader View";
 }
 
 function setPreviewReaderButtonLoading(elements, loading) {
+  if (previewState.mode === "comments") {
+    elements.readerButton.disabled = true;
+    elements.readerButton.textContent = "Reader View";
+    return;
+  }
   elements.readerButton.disabled = loading;
   if (loading) {
     elements.readerButton.textContent = "Loading Reader...";
@@ -535,6 +577,15 @@ function setPreviewReaderButtonLoading(elements, loading) {
 
 function clearPreviewReaderContent(elements) {
   elements.reader.replaceChildren();
+}
+
+function clearPreviewCommentsContent(elements, statusMessage = "Loading comments...") {
+  elements.commentsRoot.replaceChildren();
+  elements.commentsStatus.textContent = statusMessage;
+  elements.commentsStory.innerHTML = `
+    <div class="story-title">loading story...</div>
+    <div class="story-meta"><span class="status">fetching story details...</span></div>
+  `;
 }
 
 function isFrameUsable(iframe) {
@@ -717,6 +768,129 @@ function toggleReaderView() {
   openReaderView();
 }
 
+function wirePreviewPaneActions() {
+  const elements = getPreviewElements();
+  if (!elements || elements.pane.dataset.wired === "true") {
+    return;
+  }
+
+  elements.pane.dataset.wired = "true";
+  elements.closeButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    closePreview({ updateHash: true });
+  });
+  elements.readerButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleReaderView();
+  });
+}
+
+async function openCommentsPreview(preview) {
+  const storyId = Number(preview?.storyId);
+  if (!Number.isFinite(storyId)) {
+    return false;
+  }
+
+  const elements = getPreviewElements();
+  if (!elements) {
+    return false;
+  }
+
+  const title = (preview?.title || `Story ${storyId}`).trim();
+  const hnUrl = `https://news.ycombinator.com/item?id=${storyId}`;
+  const domain = (preview?.domain || "").trim();
+
+  clearPreviewBlockedTimer();
+  clearPreviewReaderController();
+  clearPreviewCommentsController();
+  previewState.loadToken += 1;
+  const token = previewState.loadToken;
+  const controller = new AbortController();
+  previewState.commentsController = controller;
+
+  elements.titleEl.textContent = title;
+  elements.domainEl.textContent = domain ? `${domain} comments` : "HN comments";
+  elements.openLink.href = hnUrl;
+  elements.openLink.textContent = "Open thread";
+  elements.pane.classList.add("is-open");
+  elements.pane.setAttribute("aria-hidden", "false");
+  setPreviewMode(elements, "comments");
+  clearPreviewReaderContent(elements);
+  clearPreviewCommentsContent(elements, "Loading comments...");
+  setPreviewFallbackMessage(elements, "");
+  setPreviewLoadingVisible(elements, true, "Loading comments...");
+  previewState.activeUrl = hnUrl;
+  app.classList.add("is-preview-open");
+
+  if (preview?.row) {
+    setSelectedStoryElement(preview.row);
+  }
+
+  let thread = null;
+  try {
+    thread = await fetchThread(storyId, { signal: controller.signal });
+  } catch (error) {
+    if (
+      isAbortError(error) ||
+      controller.signal.aborted ||
+      controller !== previewState.commentsController ||
+      token !== previewState.loadToken
+    ) {
+      return false;
+    }
+    clearPreviewCommentsContent(elements, "Could not load comments.");
+    setPreviewFallbackMessage(elements, "Comments preview failed. Use Open thread.", {
+      kind: "warning",
+    });
+    setPreviewLoadingVisible(elements, false);
+    return false;
+  }
+
+  if (
+    controller.signal.aborted ||
+    controller !== previewState.commentsController ||
+    token !== previewState.loadToken
+  ) {
+    return false;
+  }
+
+  if (!thread) {
+    clearPreviewCommentsContent(elements, "No comments available.");
+    setPreviewLoadingVisible(elements, false);
+    return false;
+  }
+
+  elements.commentsStory.replaceChildren();
+  const renderedStory = createElementFromHTML(renderStoryDetail(thread));
+  if (renderedStory) {
+    elements.commentsStory.appendChild(renderedStory);
+  } else {
+    elements.commentsStory.innerHTML = `
+      <div class="story-title">${escapeHTML(title)}</div>
+      <div class="story-meta"><span>Story preview unavailable.</span></div>
+    `;
+  }
+
+  const commentState = createCommentRenderState({
+    signal: controller.signal,
+    sectionEl: elements.commentsSection,
+    rootEl: elements.commentsRoot,
+    statusEl: elements.commentsStatus,
+  });
+  wireCommentActions(commentState);
+
+  const threadComments = normalizeThreadChildren(thread);
+  if (!threadComments.length) {
+    elements.commentsStatus.textContent = "No comments yet.";
+    setPreviewLoadingVisible(elements, false);
+    return true;
+  }
+
+  mountChildList(commentState, commentState.rootEl, threadComments, 0, { auto: true });
+  setPreviewLoadingVisible(elements, false);
+  return true;
+}
+
 function openPreview(preview, { updateHash = false } = {}) {
   if (!preview?.url) {
     return false;
@@ -737,17 +911,20 @@ function openPreview(preview, { updateHash = false } = {}) {
 
   clearPreviewBlockedTimer();
   clearPreviewReaderController();
+  clearPreviewCommentsController();
   previewState.loadToken += 1;
   const token = previewState.loadToken;
 
   elements.titleEl.textContent = title;
   elements.domainEl.textContent = domain;
   elements.openLink.href = safeUrl;
+  elements.openLink.textContent = "Open in new tab";
   elements.pane.classList.add("is-open");
   elements.pane.setAttribute("aria-hidden", "false");
   setPreviewMode(elements, "embed");
   setPreviewReaderButtonLoading(elements, false);
   clearPreviewReaderContent(elements);
+  clearPreviewCommentsContent(elements);
 
   const protocol = new URL(safeUrl).protocol;
   if (protocol === "http:") {
@@ -836,6 +1013,7 @@ function openPreviewByUrl(url, { updateHash = false } = {}) {
 function closePreview({ updateHash = false } = {}) {
   clearPreviewBlockedTimer();
   clearPreviewReaderController();
+  clearPreviewCommentsController();
   previewState.loadToken += 1;
   previewState.activeUrl = "";
   previewState.mode = "embed";
@@ -847,9 +1025,11 @@ function closePreview({ updateHash = false } = {}) {
     elements.titleEl.textContent = "Story preview";
     elements.domainEl.textContent = "";
     elements.openLink.removeAttribute("href");
+    elements.openLink.textContent = "Open in new tab";
     setPreviewMode(elements, "embed");
     setPreviewReaderButtonLoading(elements, false);
     clearPreviewReaderContent(elements);
+    clearPreviewCommentsContent(elements);
     setPreviewLoadingVisible(elements, false);
     setPreviewFallbackMessage(elements, "");
     elements.iframe.onload = null;
@@ -971,6 +1151,17 @@ function getStoryNavigationPath(link) {
   } catch {}
 
   return "";
+}
+
+function isModifiedClick(event) {
+  return (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  );
 }
 
 function isEditableTarget(target) {
@@ -1421,9 +1612,52 @@ async function renderListPage() {
         <p class="status" data-list-status hidden></p>
         <div data-list-sentinel aria-hidden="true"></div>
       </section>
+      <aside class="preview-pane" data-preview-pane aria-hidden="true">
+        <div class="preview-card">
+          <header class="preview-header">
+            <div class="preview-heading">
+              <h2 class="preview-title" data-preview-title>Story preview</h2>
+              <p class="preview-domain" data-preview-domain></p>
+            </div>
+            <div class="preview-actions">
+              <button class="btn" type="button" data-preview-reader aria-pressed="false">
+                Reader View
+              </button>
+              <a
+                class="btn"
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-preview-open
+              >
+                Open in new tab
+              </a>
+              <button class="btn" type="button" data-preview-close>Close</button>
+            </div>
+          </header>
+          <div class="preview-frame-wrap">
+            <iframe class="preview-frame" title="Story preview" data-preview-frame></iframe>
+            <section class="preview-reader" data-preview-reader-content hidden></section>
+            <section class="preview-comments" data-preview-comments hidden>
+              <article class="story story-detail preview-comments-story" data-preview-comments-story>
+                <div class="story-title">loading story...</div>
+                <div class="story-meta"><span class="status">fetching story details...</span></div>
+              </article>
+              <section class="comments" data-preview-comments-section aria-live="polite">
+                <h3 class="comments-title">Comments</h3>
+                <p class="status" data-preview-comments-status>Loading comments...</p>
+                <div class="comment-children" data-preview-comments-root></div>
+              </section>
+            </section>
+            <p class="preview-loading" data-preview-loading hidden>Loading preview...</p>
+            <p class="preview-fallback" data-preview-fallback hidden></p>
+          </div>
+        </div>
+      </aside>
     `;
     wireThemeToggleButtons();
     wireFeedToggleButtons();
+    wirePreviewPaneActions();
 
     const listEl = app.querySelector(".story-list");
     const listStatus = app.querySelector("[data-list-status]");
@@ -1455,6 +1689,33 @@ async function renderListPage() {
     };
 
     listEl.addEventListener("click", async (event) => {
+      const commentsLink = event.target.closest("[data-comments-preview]");
+      if (commentsLink && listEl.contains(commentsLink)) {
+        if (isModifiedClick(event)) {
+          return;
+        }
+
+        event.preventDefault();
+
+        if (controller.signal.aborted || currentViewController !== controller) {
+          return;
+        }
+
+        const storyId = Number(commentsLink.getAttribute("data-story-id"));
+        if (!Number.isFinite(storyId)) {
+          return;
+        }
+
+        const storyRow = commentsLink.closest(".story");
+        await openCommentsPreview({
+          storyId,
+          title: commentsLink.getAttribute("data-story-title") || commentsLink.textContent || "",
+          domain: commentsLink.getAttribute("data-story-domain") || "",
+          row: storyRow,
+        });
+        return;
+      }
+
       const titleLink = event.target.closest(".story-title a");
       if (titleLink && listEl.contains(titleLink)) {
         const storyRow = titleLink.closest(".story");
@@ -1668,6 +1929,7 @@ function renderStoryRow(story, index) {
   const localCommentsUrl = `#/item/${story.id}`;
   const storyTitleRaw = story.title || "Untitled";
   const storyTitle = escapeHTML(storyTitleRaw);
+  const escapedStoryDomain = escapeHTML(domain);
   const escapedStoryUrl = escapeHTML(storyUrl);
   const titleContent = `
     <a
@@ -1682,13 +1944,21 @@ function renderStoryRow(story, index) {
     <article class="story" data-story-rank="${index}">
       <div class="story-title">
         ${titleContent}
-        ${domain ? `<span class="domain">(${escapeHTML(domain)})</span>` : ""}
+        ${domain ? `<span class="domain">(${escapedStoryDomain})</span>` : ""}
       </div>
       <div class="story-meta">
         <span class="meta-points">${story.score ?? 0} points</span>
         <span class="meta-user">by ${escapeHTML(story.by || "unknown")}</span>
         <span class="meta-time">${timeAgo(story.time)} ago</span>
-        <span class="meta-comments"><a href="${localCommentsUrl}">${commentsCount} comments</a></span>
+        <span class="meta-comments">
+          <a
+            href="${localCommentsUrl}"
+            data-comments-preview
+            data-story-id="${story.id}"
+            data-story-title="${storyTitle}"
+            data-story-domain="${escapedStoryDomain}"
+          >${commentsCount} comments</a>
+        </span>
       </div>
     </article>
   `;
@@ -2016,10 +2286,10 @@ function createCommentElement(state, item, depth) {
 
   const toggleButton = document.createElement("button");
   toggleButton.type = "button";
-  toggleButton.className = "btn";
+  toggleButton.className = "btn comment-toggle-btn";
   toggleButton.dataset.action = "toggle-comment";
   toggleButton.dataset.slot = "toggle";
-  toggleButton.textContent = "-";
+  toggleButton.innerHTML = `<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   toggleButton.setAttribute("aria-label", "Collapse comment");
   toggleButton.title = "Collapse comment";
 
@@ -2185,7 +2455,12 @@ function mountChildList(state, container, comments, depth, { auto = true } = {})
 }
 
 function wireCommentActions(state) {
-  state.sectionEl.addEventListener("click", (event) => {
+  const previousHandler = commentActionHandlers.get(state.sectionEl);
+  if (previousHandler) {
+    state.sectionEl.removeEventListener("click", previousHandler);
+  }
+
+  const clickHandler = (event) => {
     const actionEl = event.target.closest("[data-action]");
     if (!actionEl || !state.sectionEl.contains(actionEl)) {
       return;
@@ -2244,12 +2519,14 @@ function wireCommentActions(state) {
         return;
       }
       const isCollapsed = comment.classList.toggle("is-collapsed");
-      actionEl.textContent = isCollapsed ? "+" : "-";
       const nextLabel = isCollapsed ? "Expand comment" : "Collapse comment";
       actionEl.setAttribute("aria-label", nextLabel);
       actionEl.title = nextLabel;
     }
-  });
+  };
+
+  state.sectionEl.addEventListener("click", clickHandler);
+  commentActionHandlers.set(state.sectionEl, clickHandler);
 }
 
 async function renderStoryPage(id) {

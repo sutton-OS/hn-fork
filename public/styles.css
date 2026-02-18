@@ -444,6 +444,31 @@ a:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.comment-actions .comment-toggle-btn {
+  inline-size: auto;
+  border-radius: 999px;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
+  color: var(--muted);
+}
+
+.comment-actions .comment-toggle-btn:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  color: var(--text);
+}
+
+.comment-chevron {
+  display: block;
+  flex-shrink: 0;
+  transition: transform 200ms ease;
+}
+
+.comment.is-collapsed .comment-toggle-btn .comment-chevron {
+  transform: rotate(-90deg);
+}
+
 .comment-text {
   margin-top: 4px;
 }
@@ -663,6 +688,27 @@ iframe {
   background: #0b0b0b;
 }
 
+.preview-comments {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 12px 14px 22px;
+  background: #0b0b0b;
+}
+
+.preview-comments .story-detail {
+  margin-bottom: 10px;
+  padding-bottom: 9px;
+}
+
+.preview-comments .comments-title {
+  margin-bottom: 6px;
+}
+
+.preview-comments .comment {
+  padding-left: clamp(0px, calc(var(--comment-depth) * 10px), 88px);
+}
+
 .preview-reader-article {
   max-width: 72ch;
   margin: 0 auto;
@@ -776,7 +822,8 @@ iframe {
 
 :root:is([data-theme="dark"], [data-theme="light"]) .preview-frame-wrap,
 :root:is([data-theme="dark"], [data-theme="light"]) .preview-frame,
-:root:is([data-theme="dark"], [data-theme="light"]) .preview-reader {
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-reader,
+:root:is([data-theme="dark"], [data-theme="light"]) .preview-comments {
   background: var(--bg);
 }
 
