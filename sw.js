@@ -1,4 +1,4 @@
-const STATIC_CACHE = "hnx-static-v1";
+const STATIC_CACHE = "hnx-static-v2";
 const API_CACHE = "hnx-api-v1";
 const STATIC_ASSETS = [
   "/",
@@ -10,8 +10,7 @@ const STATIC_ASSETS = [
   "/favicon-32x32.png",
   "/favicon-16x16.png",
   "/apple-touch-icon.png",
-  "/BerkeleyMono_Regular-s.p.2b82fbad.woff2",
-  "/BerkeleyMono_Regular-s.p.2b82fbad.ttf.otf",
+  "/fonts/BerkeleyMono-Regular.otf",
 ];
 
 self.addEventListener("install", (event) => {
@@ -53,8 +52,7 @@ function isStaticAssetPath(pathname) {
     pathname.endsWith(".png") ||
     pathname.endsWith(".svg") ||
     pathname.endsWith(".ttf") ||
-    pathname.endsWith(".otf") ||
-    pathname.endsWith(".woff2")
+    pathname.endsWith(".otf")
   );
 }
 
