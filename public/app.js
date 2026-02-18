@@ -1,8 +1,6 @@
 const STORIES_ENDPOINT = "/api/stories";
 const ITEM_ENDPOINT = "/api/item";
-const HN_FALLBACK_BASE = "https://hacker-news.firebaseio.com/v0";
 const PAGE_SIZE = 30;
-const FALLBACK_FETCH_CONCURRENCY = 8;
 const THEME_STORAGE_KEY = "hn-fork:theme:v1";
 const FEED_STORAGE_KEY = "hn-fork:feed:v1";
 const COMMENTS_BATCH_SIZE = 30;
@@ -1045,11 +1043,11 @@ function teardownListSelection() {
 async function fetchJSON(url, { signal, errorPrefix = "Request failed" } = {}) {
   const response = await fetch(url, { signal });
   if (!response.ok) {
-    let message = `${errorPrefix}: ${response.status} (${url})`;
+    let message = `${errorPrefix}: ${response.status}`;
     try {
       const payload = await response.json();
       if (payload?.error) {
-        message = `${errorPrefix}: ${payload.error}`;
+        message = payload.error;
       }
     } catch {}
     throw new Error(message);
@@ -1065,31 +1063,6 @@ async function fetchJSON(url, { signal, errorPrefix = "Request failed" } = {}) {
   }
 
   return response.json();
-}
-
-function isNotFoundError(error) {
-  return /\b404\b/.test(String(error?.message || ""));
-}
-
-async function fetchHNJSON(path, { signal, errorPrefix = "HN request failed" } = {}) {
-  const response = await fetch(`${HN_FALLBACK_BASE}/${path}`, { signal });
-  if (!response.ok) {
-    throw new Error(`${errorPrefix}: ${response.status}`);
-  }
-  return response.json();
-}
-
-async function fetchInChunks(items, limit, worker, { signal } = {}) {
-  const results = [];
-  for (let index = 0; index < items.length; index += limit) {
-    if (signal?.aborted) {
-      throw createAbortError();
-    }
-    const chunk = items.slice(index, index + limit);
-    const batch = await Promise.all(chunk.map(worker));
-    results.push(...batch);
-  }
-  return results;
 }
 
 async function fetchThread(id, { signal } = {}) {
@@ -1152,42 +1125,14 @@ function createTaskQueue(limit, { signal } = {}) {
 
 async function getStories(feed, { signal } = {}) {
   const normalizedFeed = normalizeFeed(feed);
-  try {
-    const payload = await fetchJSON(
-      `${STORIES_ENDPOINT}?feed=${encodeURIComponent(normalizedFeed)}`,
-      {
-        signal,
-        errorPrefix: "Stories request failed",
-      },
-    );
-    return Array.isArray(payload) ? payload : [];
-  } catch (error) {
-    if (isAbortError(error) || !isNotFoundError(error)) {
-      throw error;
-    }
-  }
-
-  const ids = await fetchHNJSON(`${normalizedFeed}stories.json`, {
-    signal,
-    errorPrefix: "Stories fallback failed",
-  });
-  const topIds = (Array.isArray(ids) ? ids : [])
-    .map((id) => Number(id))
-    .filter((id) => Number.isInteger(id) && id > 0)
-    .slice(0, PAGE_SIZE);
-
-  const stories = await fetchInChunks(
-    topIds,
-    FALLBACK_FETCH_CONCURRENCY,
-    (id) =>
-      fetchHNJSON(`item/${id}.json`, {
-        signal,
-        errorPrefix: "Story fallback item failed",
-      }).catch(() => null),
-    { signal },
+  const payload = await fetchJSON(
+    `${STORIES_ENDPOINT}?feed=${encodeURIComponent(normalizedFeed)}`,
+    {
+      signal,
+      errorPrefix: "Stories request failed",
+    },
   );
-
-  return stories.filter((story) => story && Number.isFinite(Number(story.id)));
+  return Array.isArray(payload) ? payload : [];
 }
 
 async function getItem(id, { signal, forceRefresh = false } = {}) {
@@ -1197,22 +1142,10 @@ async function getItem(id, { signal, forceRefresh = false } = {}) {
   }
 
   void forceRefresh;
-  try {
-    return await fetchJSON(`${ITEM_ENDPOINT}?id=${numericId}`, {
-      signal,
-      errorPrefix: "Item request failed",
-    });
-  } catch (error) {
-    if (isAbortError(error) || !isNotFoundError(error)) {
-      throw error;
-    }
-  }
-
-  const fallbackItem = await fetchHNJSON(`item/${numericId}.json`, {
+  return fetchJSON(`${ITEM_ENDPOINT}?id=${numericId}`, {
     signal,
-    errorPrefix: "Item fallback failed",
+    errorPrefix: "Item request failed",
   });
-  return fallbackItem || null;
 }
 
 function getDomain(url) {
@@ -1555,7 +1488,6 @@ async function renderListPage() {
       <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
     `;
     wireThemeToggleButtons();
-    wireFeedToggleButtons();
   }
 }
 
