@@ -136,8 +136,9 @@ type readerResponse struct {
 }
 
 type server struct {
-	client *http.Client
-	cache  *ttlLRUCache
+	client    *http.Client
+	cache     *ttlLRUCache
+	indexHTML []byte
 }
 
 type cacheEntry struct {
@@ -258,6 +259,10 @@ func (c *ttlLRUCache) removeEntryLocked(entry *cacheEntry) {
 func newServer() *server {
 	cache := newTTLRUCache(cacheMaxEntries)
 	cache.StartJanitor(cacheJanitorEvery)
+	indexHTML, err := os.ReadFile("./public/index.html")
+	if err != nil {
+		log.Printf("index template load failed: %v", err)
+	}
 
 	return &server{
 		client: &http.Client{
@@ -267,19 +272,21 @@ func newServer() *server {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		cache: cache,
+		cache:     cache,
+		indexHTML: indexHTML,
 	}
 }
 
 func main() {
 	s := newServer()
+	go s.prewarm(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/stories", s.handleStories)
 	mux.HandleFunc("/api/item", s.handleItem)
 	mux.HandleFunc("/api/thread", s.handleThread)
 	mux.HandleFunc("/api/reader", s.handleReader)
-	mux.Handle("/", staticFileHandler(http.Dir("./public")))
+	mux.Handle("/", s.handleIndex(staticFileHandler(http.Dir("./public"))))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -338,19 +345,80 @@ func (s *server) handleStories(w http.ResponseWriter, r *http.Request) {
 		limit = parsedLimit
 	}
 
-	ids, err := s.fetchStoryIDs(r.Context(), feed)
+	stories, err := s.getStoriesPage(r.Context(), feed, offset, limit)
 	if err != nil {
-		log.Printf("story id fetch failed for feed=%s: %v", feed, err)
-		writeError(w, http.StatusBadGateway, "failed to fetch story IDs")
+		log.Printf("story page fetch failed for feed=%s offset=%d limit=%d: %v", feed, offset, limit, err)
+		writeError(w, http.StatusBadGateway, "failed to hydrate stories")
 		return
+	}
+
+	writeJSONCached(w, http.StatusOK, stories, 60*time.Second, 30*time.Second)
+}
+
+func (s *server) handleIndex(static http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			static.ServeHTTP(w, r)
+			return
+		}
+		s.serveIndex(w, r)
+	})
+}
+
+func (s *server) serveIndex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set(allowHeader, "GET, HEAD")
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	html := s.indexHTML
+	if len(html) == 0 {
+		staticFileHandler(http.Dir("./public")).ServeHTTP(w, r)
+		return
+	}
+
+	preloadStories, err := s.getStoriesPage(r.Context(), "best", 0, defaultStoriesLimit)
+	if err != nil {
+		log.Printf("index preload failed: %v", err)
+	}
+
+	payload := map[string]any{
+		"feed":    "best",
+		"offset":  0,
+		"limit":   defaultStoriesLimit,
+		"stories": preloadStories,
+	}
+	preloadJSON, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		log.Printf("index preload JSON marshal failed: %v", marshalErr)
+		preloadJSON = []byte("{}")
+	}
+	injection := `<script id="hn-preload" type="application/json">` + string(preloadJSON) + `</script>`
+	rendered := injectBeforeBodyClose(html, injection)
+
+	w.Header().Set(contentTypeHeader, "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	if _, err := w.Write(rendered); err != nil {
+		log.Printf("index write failed: %v", err)
+	}
+}
+
+func (s *server) getStoriesPage(ctx context.Context, feed string, offset int, limit int) ([]storyResponse, error) {
+	ids, err := s.fetchStoryIDs(ctx, feed)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(ids) > maxStoriesPerFeed {
 		ids = ids[:maxStoriesPerFeed]
 	}
 	if offset >= len(ids) {
-		writeJSON(w, http.StatusOK, []storyResponse{})
-		return
+		return []storyResponse{}, nil
 	}
 
 	end := offset + limit
@@ -359,11 +427,9 @@ func (s *server) handleStories(w http.ResponseWriter, r *http.Request) {
 	}
 	ids = ids[offset:end]
 
-	items, err := s.fetchItemsConcurrently(r.Context(), ids)
+	items, err := s.fetchItemsConcurrently(ctx, ids)
 	if err != nil {
-		log.Printf("story hydration failed for feed=%s: %v", feed, err)
-		writeError(w, http.StatusBadGateway, "failed to hydrate stories")
-		return
+		return nil, err
 	}
 
 	stories := make([]storyResponse, 0, len(items))
@@ -373,8 +439,7 @@ func (s *server) handleStories(w http.ResponseWriter, r *http.Request) {
 		}
 		stories = append(stories, toStoryResponse(item))
 	}
-
-	writeJSONCached(w, http.StatusOK, stories, 60*time.Second, 30*time.Second)
+	return stories, nil
 }
 
 func (s *server) handleItem(w http.ResponseWriter, r *http.Request) {
@@ -762,6 +827,24 @@ func (s *server) fetchFirebaseJSON(ctx context.Context, path string, dst any) er
 	return decoder.Decode(dst)
 }
 
+func (s *server) prewarm(ctx context.Context) {
+	feeds := []string{"best", "top", "new"}
+	for _, feed := range feeds {
+		feed := feed
+		go func() {
+			warmCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+
+			stories, err := s.getStoriesPage(warmCtx, feed, 0, defaultStoriesLimit)
+			if err != nil {
+				log.Printf("cache prewarm failed for feed=%s: %v", feed, err)
+				return
+			}
+			log.Printf("cache prewarm complete for feed=%s count=%d", feed, len(stories))
+		}()
+	}
+}
+
 func parseID(raw string) (int, bool) {
 	id, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || id <= 0 {
@@ -989,11 +1072,36 @@ func staticFileHandler(root http.FileSystem) http.Handler {
 	fs := http.FileServer(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if strings.HasSuffix(path, ".html") || path == "/" {
+		switch {
+		case strings.HasSuffix(path, ".html"), path == "/", path == "/sw.js":
 			w.Header().Set("Cache-Control", "no-cache")
-		} else {
+		case path == "/app.js", path == "/styles.css":
+			w.Header().Set("Cache-Control", "public, max-age=300, must-revalidate")
+		default:
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		fs.ServeHTTP(w, r)
 	})
+}
+
+func injectBeforeBodyClose(document []byte, injection string) []byte {
+	if len(document) == 0 || injection == "" {
+		return document
+	}
+
+	lower := bytes.ToLower(document)
+	closeTag := []byte("</body>")
+	idx := bytes.LastIndex(lower, closeTag)
+	if idx < 0 {
+		rendered := make([]byte, 0, len(document)+len(injection))
+		rendered = append(rendered, document...)
+		rendered = append(rendered, injection...)
+		return rendered
+	}
+
+	rendered := make([]byte, 0, len(document)+len(injection))
+	rendered = append(rendered, document[:idx]...)
+	rendered = append(rendered, injection...)
+	rendered = append(rendered, document[idx:]...)
+	return rendered
 }

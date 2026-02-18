@@ -22,6 +22,7 @@ const FEED_BEST = "best";
 const FEED_TOP = "top";
 const FEED_NEW = "new";
 const FEEDS = [FEED_BEST, FEED_TOP, FEED_NEW];
+const PRELOAD_SCRIPT_ID = "hn-preload";
 const app = document.getElementById("app");
 app?.classList.add("shell");
 
@@ -39,6 +40,7 @@ const previewState = {
   mode: "embed",
 };
 let readabilityModulePromise = null;
+const preloadedStoriesState = readPreloadedStories();
 
 applyTheme(loadSavedTheme());
 applyFeed(loadSavedFeed());
@@ -115,6 +117,54 @@ function parseRoute() {
   }
 
   return { type: "list" };
+}
+
+function readPreloadedStories() {
+  const preloadEl = document.getElementById(PRELOAD_SCRIPT_ID);
+  if (!preloadEl) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(preloadEl.textContent || "{}");
+    const feed = normalizeFeed(payload?.feed);
+    const offset = Math.max(0, Number(payload?.offset) || 0);
+    const limit = Math.max(1, Number(payload?.limit) || PAGE_SIZE);
+    const stories = Array.isArray(payload?.stories) ? payload.stories : [];
+
+    return {
+      consumed: false,
+      feed,
+      offset,
+      limit,
+      stories,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function takePreloadedStories(feed, { offset = 0, limit = PAGE_SIZE } = {}) {
+  if (!preloadedStoriesState || preloadedStoriesState.consumed) {
+    return null;
+  }
+
+  const normalizedFeed = normalizeFeed(feed);
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Math.max(1, Number(limit) || PAGE_SIZE);
+
+  if (
+    preloadedStoriesState.feed !== normalizedFeed ||
+    preloadedStoriesState.offset !== safeOffset
+  ) {
+    return null;
+  }
+  if (preloadedStoriesState.limit !== safeLimit) {
+    return null;
+  }
+
+  preloadedStoriesState.consumed = true;
+  return preloadedStoriesState.stories;
 }
 
 function escapeHTML(value) {
@@ -1479,11 +1529,18 @@ async function renderListPage() {
 
       try {
         const batchStart = nextBatchStart;
-        const fetchedStories = await getStories(currentFeed, {
-          signal: controller.signal,
+        const preloadedStories = takePreloadedStories(currentFeed, {
           offset: batchStart,
           limit: PAGE_SIZE,
         });
+        const fetchedStories =
+          Array.isArray(preloadedStories) && preloadedStories.length > 0
+            ? preloadedStories
+            : await getStories(currentFeed, {
+                signal: controller.signal,
+                offset: batchStart,
+                limit: PAGE_SIZE,
+              });
         if (controller.signal.aborted || currentViewController !== controller) {
           return;
         }
@@ -1521,33 +1578,29 @@ async function renderListPage() {
           selectedStoryIndex = 0;
         }
         applyListSelection({ scroll: false });
+        const nextRows = batchStories.map((story, index) => {
+          const rank = batchStart + index + 1;
+          const html =
+            story && Number.isFinite(Number(story.id))
+              ? renderStoryRow(story, rank)
+              : renderFailedStoryRow("unknown", rank);
+          return createElementFromHTML(html);
+        });
 
-        const replaceSlot = (slotIndex, html) => {
-          const current = slots[slotIndex];
-          if (!current || !current.isConnected) {
+        nextRows.forEach((next, slotIndex) => {
+          if (controller.signal.aborted || currentViewController !== controller) {
             return;
           }
-          const next = createElementFromHTML(html);
-          if (!next) {
+          const current = slots[slotIndex];
+          if (!current || !current.isConnected || !next) {
             return;
           }
           current.replaceWith(next);
           slots[slotIndex] = next;
-          applyListSelection({ scroll: false });
-          applyListRoute(parseRoute());
-        };
-
-        batchStories.forEach((story, index) => {
-          if (controller.signal.aborted || currentViewController !== controller) {
-            return;
-          }
-          const rank = batchStart + index + 1;
-          if (story && Number.isFinite(Number(story.id))) {
-            replaceSlot(index, renderStoryRow(story, rank));
-            return;
-          }
-          replaceSlot(index, renderFailedStoryRow("unknown", rank));
         });
+
+        applyListSelection({ scroll: false });
+        applyListRoute(parseRoute());
 
         if (controller.signal.aborted || currentViewController !== controller) {
           return;
@@ -2293,4 +2346,12 @@ async function renderStoryPage(id) {
   }
 
   mountChildList(commentState, commentState.rootEl, threadComments, 0, { auto: true });
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.error("Service worker registration failed.", error);
+    });
+  });
 }
