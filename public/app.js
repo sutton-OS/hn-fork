@@ -44,6 +44,16 @@ applyTheme(loadSavedTheme());
 applyFeed(loadSavedFeed());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("load", handleRouteChange);
+// Prefetch Readability on idle so Reader View opens instantly when needed
+if ("requestIdleCallback" in window) {
+  window.requestIdleCallback(() => {
+    void getReadabilityCtor().catch(() => {});
+  });
+} else {
+  window.setTimeout(() => {
+    void getReadabilityCtor().catch(() => {});
+  }, 3000);
+}
 document.addEventListener("keydown", handleGlobalKeydown);
 
 async function handleRouteChange() {
@@ -2229,9 +2239,10 @@ async function renderStoryPage(id) {
     return;
   }
 
-  let story = null;
+  // Fetch thread directly — it includes story metadata, so no separate getItem call needed.
+  let thread = null;
   try {
-    story = await getItem(storyId, { signal: controller.signal });
+    thread = await fetchThread(storyId, { signal: controller.signal });
   } catch (error) {
     if (
       isAbortError(error) ||
@@ -2253,7 +2264,7 @@ async function renderStoryPage(id) {
     return;
   }
 
-  if (!story) {
+  if (!thread) {
     detailSlot.innerHTML = `
       <div class="story-title">story not found</div>
     `;
@@ -2261,7 +2272,7 @@ async function renderStoryPage(id) {
     return;
   }
 
-  const renderedStory = createElementFromHTML(renderStoryDetail(story));
+  const renderedStory = createElementFromHTML(renderStoryDetail(thread));
   if (renderedStory) {
     detailSlot.replaceWith(renderedStory);
   }
@@ -2274,26 +2285,6 @@ async function renderStoryPage(id) {
   });
 
   wireCommentActions(commentState);
-
-  let thread = null;
-  try {
-    thread = await fetchThread(story.id || storyId, { signal: controller.signal });
-  } catch (error) {
-    if (
-      isAbortError(error) ||
-      controller.signal.aborted ||
-      currentViewController !== controller
-    ) {
-      return;
-    }
-
-    commentsStatus.textContent = "Could not load comments.";
-    return;
-  }
-
-  if (controller.signal.aborted || currentViewController !== controller) {
-    return;
-  }
 
   const threadComments = normalizeThreadChildren(thread);
   if (!threadComments.length) {

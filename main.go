@@ -27,7 +27,7 @@ const (
 	defaultStoriesLimit = 30
 	maxConcurrentFetch  = 8
 	firebaseTimeout     = 5 * time.Second
-	listCacheTTL        = 90 * time.Second
+	listCacheTTL        = 5 * time.Minute
 	itemCacheTTL        = 3 * time.Minute
 	cacheMaxEntries     = 1200
 	cacheJanitorEvery   = 30 * time.Second
@@ -260,8 +260,14 @@ func newServer() *server {
 	cache.StartJanitor(cacheJanitorEvery)
 
 	return &server{
-		client: &http.Client{},
-		cache:  cache,
+		client: &http.Client{
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+		cache: cache,
 	}
 }
 
@@ -273,7 +279,7 @@ func main() {
 	mux.HandleFunc("/api/item", s.handleItem)
 	mux.HandleFunc("/api/thread", s.handleThread)
 	mux.HandleFunc("/api/reader", s.handleReader)
-	mux.Handle("/", http.FileServer(http.Dir("./public")))
+	mux.Handle("/", staticFileHandler(http.Dir("./public")))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -368,7 +374,7 @@ func (s *server) handleStories(w http.ResponseWriter, r *http.Request) {
 		stories = append(stories, toStoryResponse(item))
 	}
 
-	writeJSON(w, http.StatusOK, stories)
+	writeJSONCached(w, http.StatusOK, stories, 60*time.Second, 30*time.Second)
 }
 
 func (s *server) handleItem(w http.ResponseWriter, r *http.Request) {
@@ -395,7 +401,7 @@ func (s *server) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toItemResponse(item))
+	writeJSONCached(w, http.StatusOK, toItemResponse(item), 120*time.Second, 60*time.Second)
 }
 
 func (s *server) handleThread(w http.ResponseWriter, r *http.Request) {
@@ -433,7 +439,7 @@ func (s *server) handleThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toThreadResponse(story, comments))
+	writeJSONCached(w, http.StatusOK, toThreadResponse(story, comments), 120*time.Second, 60*time.Second)
 }
 
 func (s *server) handleReader(w http.ResponseWriter, r *http.Request) {
@@ -889,6 +895,17 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
+func writeJSONCached(w http.ResponseWriter, status int, payload any, maxAge time.Duration, swr time.Duration) {
+	if maxAge > 0 {
+		cc := fmt.Sprintf("public, max-age=%d", int(maxAge.Seconds()))
+		if swr > 0 {
+			cc += fmt.Sprintf(", stale-while-revalidate=%d", int(swr.Seconds()))
+		}
+		w.Header().Set("Cache-Control", cc)
+	}
+	writeJSON(w, status, payload)
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(accessAllowOrigin, "*")
@@ -936,6 +953,13 @@ func (g *gzipResponseWriter) Flush() {
 	}
 }
 
+var gzipWriterPool = sync.Pool{
+	New: func() any {
+		w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
+		return w
+	},
+}
+
 func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get(acceptEncoding), gzipEncoding) {
@@ -947,12 +971,29 @@ func gzipMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		gz := gzip.NewWriter(w)
-		defer gz.Close()
+		gz := gzipWriterPool.Get().(*gzip.Writer)
+		gz.Reset(w)
+		defer func() {
+			_ = gz.Close()
+			gzipWriterPool.Put(gz)
+		}()
 
 		next.ServeHTTP(&gzipResponseWriter{
 			ResponseWriter: w,
 			writer:         gz,
 		}, r)
+	})
+}
+
+func staticFileHandler(root http.FileSystem) http.Handler {
+	fs := http.FileServer(root)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasSuffix(path, ".html") || path == "/" {
+			w.Header().Set("Cache-Control", "no-cache")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+		fs.ServeHTTP(w, r)
 	})
 }
