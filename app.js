@@ -40,7 +40,6 @@ let currentViewController = null;
 let persistItemCacheTimer = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
-let activeListPage = 1;
 let currentTheme = THEME_TERMINAL;
 let currentFeed = FEED_BEST;
 const previewState = {
@@ -80,25 +79,12 @@ async function renderRoute(route = parseRoute()) {
     return;
   }
 
-  await renderListPage(route.page);
+  await renderListPage();
   applyListRoute(route);
 }
 
 function canHandleRouteInPlace(route) {
-  if (app.dataset.view !== "list") {
-    return false;
-  }
-
-  if (route.type !== "list") {
-    return false;
-  }
-
-  const hash = window.location.hash.replace(/^#/, "").trim();
-  if (!hash || hash === "/" || route.page === activeListPage) {
-    return true;
-  }
-
-  return false;
+  return app.dataset.view === "list" && route.type === "list";
 }
 
 function applyListRoute(route) {
@@ -111,12 +97,12 @@ function parseRoute() {
   const hash = window.location.hash.replace(/^#/, "").trim();
 
   if (!hash || hash === "/") {
-    return { type: "list", page: 1 };
+    return { type: "list" };
   }
 
   const pageMatch = hash.match(/^\/page\/(\d+)$/);
   if (pageMatch) {
-    return { type: "list", page: Math.max(1, Number(pageMatch[1])) };
+    return { type: "list" };
   }
 
   const storyMatch = hash.match(/^\/(?:item|story)\/(\d+)$/);
@@ -129,7 +115,7 @@ function parseRoute() {
     return { type: "story", id: Number(queryStoryMatch[1]) };
   }
 
-  return { type: "list", page: 1 };
+  return { type: "list" };
 }
 
 function escapeHTML(value) {
@@ -183,6 +169,16 @@ function saveFeed(feed) {
 
 function getThemeLabel(theme = currentTheme) {
   if (theme === THEME_DARK) {
+    return "☾";
+  }
+  if (theme === THEME_LIGHT) {
+    return "☀";
+  }
+  return "⌘";
+}
+
+function getThemeName(theme = currentTheme) {
+  if (theme === THEME_DARK) {
     return "Dark";
   }
   if (theme === THEME_LIGHT) {
@@ -203,9 +199,10 @@ function getFeedLabel(feed = currentFeed) {
 
 function updateThemeToggleLabels() {
   const label = getThemeLabel();
+  const name = getThemeName();
   app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
     button.textContent = label;
-    button.setAttribute("aria-label", `Theme: ${label}`);
+    button.setAttribute("aria-label", `Theme: ${name}`);
   });
 }
 
@@ -245,12 +242,11 @@ function rerenderListForFeedChange() {
   if (app.dataset.view !== "list") {
     return;
   }
-  activeListPage = 0;
-  if (window.location.hash !== "#/page/1") {
-    window.location.hash = "/page/1";
-    return;
+  const hash = window.location.hash.replace(/^#/, "").trim();
+  if (hash && hash !== "/") {
+    window.location.hash = "/";
   }
-  void renderRoute({ type: "list", page: 1 });
+  void renderRoute({ type: "list" });
 }
 
 function toggleFeed() {
@@ -1385,21 +1381,16 @@ function topbar(content) {
         <button class="btn feed-toggle" type="button" data-feed-toggle>
           ${getFeedLabel()}
         </button>
-        <button class="btn theme-toggle" type="button" data-theme-toggle>
+        <button
+          class="btn theme-toggle"
+          type="button"
+          data-theme-toggle
+          aria-label="Theme: ${getThemeName()}"
+        >
           ${getThemeLabel()}
         </button>
       </div>
     </header>
-  `;
-}
-
-function loadingPager(page) {
-  return `
-    <nav class="pager" aria-label="Pagination">
-      <button class="btn" disabled>prev</button>
-      <span>${Math.max(1, page)}/...</span>
-      <button class="btn" disabled>next</button>
-    </nav>
   `;
 }
 
@@ -1412,6 +1403,7 @@ function createElementFromHTML(html) {
 function createLoadingRow(index, message = "loading...") {
   const row = document.createElement("article");
   row.className = "story";
+  row.dataset.storyRank = String(index);
   row.innerHTML = `
     <div class="story-title"><span class="story-rank">${index}.</span><span class="story-title-text">${message}</span></div>
     <div class="story-meta"><span>fetching story details...</span></div>
@@ -1419,55 +1411,71 @@ function createLoadingRow(index, message = "loading...") {
   return row;
 }
 
-function renderLoadingRows(listEl, count, startIndex) {
+function appendLoadingRows(listEl, count, startIndex) {
   const slots = [];
   const fragment = document.createDocumentFragment();
 
   for (let i = 0; i < count; i += 1) {
     const row = createLoadingRow(startIndex + i + 1);
-    row.dataset.slot = String(i);
     slots.push(row);
     fragment.appendChild(row);
   }
 
-  listEl.replaceChildren(fragment);
+  listEl.appendChild(fragment);
   return slots;
 }
 
-function renderFailedStoryRow(id, index, slotIndex) {
+function renderFailedStoryRow(id, index) {
   return `
-    <article class="story" data-slot="${slotIndex}">
+    <article class="story" data-story-rank="${index}">
       <div class="story-title"><span class="story-rank">${index}.</span><span class="story-title-text">failed to load</span></div>
       <div class="story-meta">
         <span>item ${id}</span>
-        <span><button class="btn" type="button" data-retry-id="${id}" data-retry-slot="${slotIndex}">retry</button></span>
+        <span><button class="btn" type="button" data-retry-id="${id}" data-retry-rank="${index}">retry</button></span>
       </div>
     </article>
   `;
 }
 
-async function renderListPage(page) {
+async function renderListPage() {
   const controller = new AbortController();
   currentViewController = controller;
+  let infiniteObserver = null;
+  let scrollFallbackHandler = null;
+
+  const teardownInfiniteLoading = () => {
+    if (infiniteObserver) {
+      infiniteObserver.disconnect();
+      infiniteObserver = null;
+    }
+    if (scrollFallbackHandler) {
+      window.removeEventListener("scroll", scrollFallbackHandler);
+      scrollFallbackHandler = null;
+    }
+  };
+
+  controller.signal.addEventListener("abort", teardownInfiniteLoading, { once: true });
 
   try {
     app.dataset.view = "list";
     app.innerHTML = `
       <section class="list-pane">
-        ${topbar(loadingPager(page))}
+        ${topbar("")}
         <section class="story-list"></section>
+        <p class="status" data-list-status hidden></p>
+        <div data-list-sentinel aria-hidden="true"></div>
       </section>
     `;
     wireThemeToggleButtons();
     wireFeedToggleButtons();
 
     const listEl = app.querySelector(".story-list");
-    if (!listEl) {
+    const listStatus = app.querySelector("[data-list-status]");
+    const sentinel = app.querySelector("[data-list-sentinel]");
+    if (!listEl || !listStatus || !sentinel) {
       return;
     }
 
-    let start = (Math.max(1, page) - 1) * PAGE_SIZE;
-    let slots = renderLoadingRows(listEl, PAGE_SIZE, start);
     initializeListSelection(listEl);
     applyListRoute(parseRoute());
 
@@ -1476,40 +1484,27 @@ async function renderListPage(page) {
       return;
     }
 
-    const totalPages = Math.max(1, Math.ceil(ids.length / PAGE_SIZE));
-    const safePage = Math.min(Math.max(1, page), totalPages);
-    activeListPage = safePage;
-    start = (safePage - 1) * PAGE_SIZE;
-    const pageIds = ids.slice(start, start + PAGE_SIZE);
-
-    const nextTopbar = createElementFromHTML(topbar(pager(safePage, totalPages)));
-    const currentTopbar = app.querySelector(".topbar");
-    if (nextTopbar && currentTopbar) {
-      currentTopbar.replaceWith(nextTopbar);
-      wirePagination();
-      wireThemeToggleButtons();
-      wireFeedToggleButtons();
-    }
-
-    if (!pageIds.length) {
-      listEl.innerHTML = '<p class="status">No stories available.</p>';
+    if (!ids.length) {
+      listStatus.hidden = false;
+      listStatus.textContent = "No stories available.";
       return;
     }
 
-    slots = renderLoadingRows(listEl, pageIds.length, start);
-    initializeListSelection(listEl);
+    const setListStatus = (value = "") => {
+      const next = (value || "").trim();
+      listStatus.hidden = !next;
+      listStatus.textContent = next;
+    };
 
-    const replaceSlot = (slotIndex, html) => {
-      const current = slots[slotIndex];
-      if (!current || !current.isConnected) {
+    const replaceRow = (sourceRow, html) => {
+      if (!sourceRow || !sourceRow.isConnected) {
         return;
       }
       const next = createElementFromHTML(html);
       if (!next) {
         return;
       }
-      current.replaceWith(next);
-      slots[slotIndex] = next;
+      sourceRow.replaceWith(next);
       applyListSelection({ scroll: false });
       applyListRoute(parseRoute());
     };
@@ -1535,18 +1530,15 @@ async function renderListPage(page) {
       }
 
       const id = Number(retryButton.getAttribute("data-retry-id"));
-      const slotIndex = Number(retryButton.getAttribute("data-retry-slot"));
-      if (!Number.isFinite(id) || !Number.isInteger(slotIndex)) {
+      const rank = Number(retryButton.getAttribute("data-retry-rank"));
+      const row = retryButton.closest(".story");
+      if (!Number.isFinite(id) || !Number.isInteger(rank) || !row || !row.isConnected) {
         return;
       }
 
-      const loadingRow = createLoadingRow(start + slotIndex + 1, "retrying...");
-      const slot = slots[slotIndex];
-      if (!slot || !slot.isConnected) {
-        return;
-      }
-      slot.replaceWith(loadingRow);
-      slots[slotIndex] = loadingRow;
+      const loadingRow = createLoadingRow(rank, "retrying...");
+      row.replaceWith(loadingRow);
+      applyListSelection({ scroll: false });
 
       let story = null;
       try {
@@ -1565,27 +1557,107 @@ async function renderListPage(page) {
       }
 
       if (story) {
-        replaceSlot(slotIndex, renderStoryRow(story, start + slotIndex + 1));
+        replaceRow(loadingRow, renderStoryRow(story, rank));
         return;
       }
 
-      replaceSlot(slotIndex, renderFailedStoryRow(id, start + slotIndex + 1, slotIndex));
+      replaceRow(loadingRow, renderFailedStoryRow(id, rank));
     });
 
-    await getItems(pageIds, {
-      signal: controller.signal,
-      onItem: ({ id, index, data }) => {
-        if (controller.signal.aborted || currentViewController !== controller) {
+    let isLoadingBatch = false;
+    let nextBatchStart = 0;
+
+    const loadNextBatch = async () => {
+      if (
+        isLoadingBatch ||
+        controller.signal.aborted ||
+        currentViewController !== controller ||
+        nextBatchStart >= ids.length
+      ) {
+        return;
+      }
+
+      isLoadingBatch = true;
+      setListStatus("Loading stories...");
+
+      const batchStart = nextBatchStart;
+      const batchIds = ids.slice(batchStart, batchStart + PAGE_SIZE);
+      nextBatchStart += batchIds.length;
+
+      const slots = appendLoadingRows(listEl, batchIds.length, batchStart);
+      if (selectedStoryIndex < 0 && slots.length) {
+        selectedStoryIndex = 0;
+      }
+      applyListSelection({ scroll: false });
+
+      const replaceSlot = (slotIndex, html) => {
+        const current = slots[slotIndex];
+        if (!current || !current.isConnected) {
           return;
         }
-        if (data) {
-          replaceSlot(index, renderStoryRow(data, start + index + 1));
+        const next = createElementFromHTML(html);
+        if (!next) {
           return;
         }
-        replaceSlot(index, renderFailedStoryRow(id, start + index + 1, index));
-      },
-    });
+        current.replaceWith(next);
+        slots[slotIndex] = next;
+        applyListSelection({ scroll: false });
+        applyListRoute(parseRoute());
+      };
+
+      try {
+        await getItems(batchIds, {
+          signal: controller.signal,
+          onItem: ({ id, index, data }) => {
+            if (controller.signal.aborted || currentViewController !== controller) {
+              return;
+            }
+            const rank = batchStart + index + 1;
+            if (data) {
+              replaceSlot(index, renderStoryRow(data, rank));
+              return;
+            }
+            replaceSlot(index, renderFailedStoryRow(id, rank));
+          },
+        });
+      } finally {
+        isLoadingBatch = false;
+      }
+
+      if (controller.signal.aborted || currentViewController !== controller) {
+        return;
+      }
+
+      if (nextBatchStart >= ids.length) {
+        teardownInfiniteLoading();
+      }
+
+      setListStatus("");
+    };
+
+    if ("IntersectionObserver" in window) {
+      infiniteObserver = new IntersectionObserver(
+        (entries) => {
+          const shouldLoad = entries.some((entry) => entry.isIntersecting);
+          if (shouldLoad) {
+            void loadNextBatch();
+          }
+        },
+        { rootMargin: "600px 0px" },
+      );
+      infiniteObserver.observe(sentinel);
+    } else {
+      scrollFallbackHandler = () => {
+        if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600) {
+          void loadNextBatch();
+        }
+      };
+      window.addEventListener("scroll", scrollFallbackHandler, { passive: true });
+    }
+
+    await loadNextBatch();
   } catch (error) {
+    teardownInfiniteLoading();
     if (
       isAbortError(error) ||
       controller.signal.aborted ||
@@ -1599,16 +1671,6 @@ async function renderListPage(page) {
     `;
     wireThemeToggleButtons();
   }
-}
-
-function pager(page, totalPages) {
-  return `
-    <nav class="pager" aria-label="Pagination">
-      <button class="btn" ${page <= 1 ? "disabled" : ""} data-page="${page - 1}">prev</button>
-      <span>${page}/${totalPages}</span>
-      <button class="btn" ${page >= totalPages ? "disabled" : ""} data-page="${page + 1}">next</button>
-    </nav>
-  `;
 }
 
 function renderStoryRow(story, index) {
@@ -1634,7 +1696,7 @@ function renderStoryRow(story, index) {
   `;
 
   return `
-    <article class="story">
+    <article class="story" data-story-rank="${index}">
       <div class="story-title">
         ${titleContent}
         ${domain ? `<span class="domain">(${escapeHTML(domain)})</span>` : ""}
@@ -1647,16 +1709,6 @@ function renderStoryRow(story, index) {
       </div>
     </article>
   `;
-}
-
-function wirePagination() {
-  app.querySelectorAll("[data-page]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const page = button.getAttribute("data-page");
-      if (!page) return;
-      window.location.hash = `/page/${page}`;
-    });
-  });
 }
 
 const SANITIZE_ALLOWED_TAGS = new Set([
@@ -1971,7 +2023,10 @@ function createCommentElement(state, item, depth) {
   toggleButton.type = "button";
   toggleButton.className = "btn";
   toggleButton.dataset.action = "toggle-comment";
-  toggleButton.textContent = "collapse";
+  toggleButton.dataset.slot = "toggle";
+  toggleButton.textContent = "-";
+  toggleButton.setAttribute("aria-label", "Collapse comment");
+  toggleButton.title = "Collapse comment";
 
   actions.appendChild(toggleButton);
 
@@ -2000,8 +2055,16 @@ function createCommentElement(state, item, depth) {
     repliesButton.type = "button";
     repliesButton.className = "btn";
     repliesButton.dataset.action = "load-replies";
+    repliesButton.dataset.slot = "replies";
     repliesButton.dataset.commentId = String(item.id);
-    repliesButton.textContent = `Show replies (${normalizedKids.length})`;
+    repliesButton.textContent = String(normalizedKids.length);
+    repliesButton.setAttribute(
+      "aria-label",
+      `Show ${normalizedKids.length} ${normalizedKids.length === 1 ? "reply" : "replies"}`,
+    );
+    repliesButton.title = `Show ${normalizedKids.length} ${
+      normalizedKids.length === 1 ? "reply" : "replies"
+    }`;
     actions.appendChild(repliesButton);
 
     state.moreItems.set(item.id, {
@@ -2186,7 +2249,10 @@ function wireCommentActions(state) {
         return;
       }
       const isCollapsed = comment.classList.toggle("is-collapsed");
-      actionEl.textContent = isCollapsed ? "expand" : "collapse";
+      actionEl.textContent = isCollapsed ? "+" : "-";
+      const nextLabel = isCollapsed ? "Expand comment" : "Collapse comment";
+      actionEl.setAttribute("aria-label", nextLabel);
+      actionEl.title = nextLabel;
     }
   });
 }
@@ -2305,9 +2371,3 @@ async function renderStoryPage(id) {
 
   mountChildList(commentState, commentState.rootEl, threadComments, 0, { auto: true });
 }
-
-document.addEventListener("click", (event) => {
-  const target = event.target.closest("[data-page]");
-  if (!target) return;
-  event.preventDefault();
-});
