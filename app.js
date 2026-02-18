@@ -30,7 +30,7 @@ const unescape = document.createElement("textarea");
 let currentViewController = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
-let currentTheme = THEME_TERMINAL;
+let currentTheme = THEME_LIGHT;
 let currentFeed = FEED_BEST;
 const previewState = {
   activeUrl: "",
@@ -179,7 +179,7 @@ function normalizeTheme(theme) {
   if (theme === "bloomberg-light") {
     return THEME_LIGHT;
   }
-  return THEMES.includes(theme) ? theme : THEME_TERMINAL;
+  return THEMES.includes(theme) ? theme : THEME_LIGHT;
 }
 
 function normalizeFeed(feed) {
@@ -191,7 +191,7 @@ function loadSavedTheme() {
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
     return normalizeTheme(saved);
   } catch {
-    return THEME_TERMINAL;
+    return THEME_LIGHT;
   }
 }
 

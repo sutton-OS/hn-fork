@@ -16,7 +16,7 @@
   --c-green:  #5C7CFA; /* DOMAIN (indigo-blue) */
   --c-yellow: #FFD60A; /* OPEN (gold) */
   --bloomberg-scale: 1;
-  --layout-scale: 1.25;
+  --layout-scale: 0.84;
 }
 @font-face {
   font-family: "Berkeley Mono";
@@ -85,6 +85,7 @@
   --theme-story-hover-ring: rgba(255, 255, 255, 0.1);
   --theme-reader-body: rgba(240, 242, 245, 0.9);
   --bloomberg-scale: 1.25;
+  --layout-scale: 1.25;
 }
 
 :root[data-theme="light"] {
@@ -109,6 +110,7 @@
   --theme-story-hover-ring: rgba(0, 0, 0, 0.12);
   --theme-reader-body: rgba(0, 0, 0, 0.9);
   --bloomberg-scale: 1.25;
+  --layout-scale: 1.25;
 }
 
 *,
@@ -327,9 +329,53 @@ a:hover {
 }
 
 .theme-toggle {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-height: 28px;
+  border: var(--line-width) solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    linear-gradient(140deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.06)),
+    rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px) saturate(130%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 6px 16px rgba(0, 0, 0, 0.18);
+  transition: box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.theme-toggle:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    0 8px 20px rgba(0, 0, 0, 0.24);
+}
+
+.theme-toggle:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.32),
+    0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme="light"] .theme-toggle {
+  border-color: rgba(0, 0, 0, 0.12);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.6)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+:root[data-theme="light"] .theme-toggle:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    0 10px 20px rgba(0, 0, 0, 0.12);
 }
 
 .theme-toggle-icon {
