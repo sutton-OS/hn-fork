@@ -26,7 +26,7 @@ const (
 	maxStoriesPerFeed   = 120
 	defaultStoriesLimit = 30
 	maxConcurrentFetch  = 8
-	firebaseTimeout     = 5 * time.Second
+	firebaseTimeout     = 12 * time.Second
 	listCacheTTL        = 5 * time.Minute
 	itemCacheTTL        = 3 * time.Minute
 	cacheMaxEntries     = 1200
@@ -492,12 +492,14 @@ func (s *server) handleThread(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "story not found")
 		return
 	}
-	if story.Type != "story" {
+	if story.Type != "story" && story.Type != "job" && story.Type != "poll" {
 		writeError(w, http.StatusBadRequest, "id must reference a story item")
 		return
 	}
 
-	comments, err := s.fetchCommentForest(r.Context(), story.Kids)
+	threadCtx, threadCancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer threadCancel()
+	comments, err := s.fetchCommentForest(threadCtx, story.Kids)
 	if err != nil {
 		log.Printf("thread comment hydration failed id=%d: %v", id, err)
 		writeError(w, http.StatusBadGateway, "failed to hydrate comment tree")
@@ -716,18 +718,6 @@ func (s *server) fetchCommentForest(ctx context.Context, ids []int) ([]*commentR
 
 	results := make([]*commentResponse, len(ids))
 	sem := make(chan struct{}, maxConcurrentFetch)
-	errCh := make(chan error, 1)
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	setErr := func(err error) {
-		select {
-		case errCh <- err:
-			cancel()
-		default:
-		}
-	}
 
 	var wg sync.WaitGroup
 	for i, id := range ids {
@@ -736,7 +726,8 @@ func (s *server) fetchCommentForest(ctx context.Context, ids []int) ([]*commentR
 			defer wg.Done()
 			node, err := s.fetchCommentNode(ctx, commentID, sem)
 			if err != nil {
-				setErr(err)
+				log.Printf("comment fetch failed id=%d: %v", commentID, err)
+				// Non-fatal: leave results[idx] as nil, compactComments will skip it
 				return
 			}
 			results[idx] = node
@@ -744,12 +735,7 @@ func (s *server) fetchCommentForest(ctx context.Context, ids []int) ([]*commentR
 	}
 
 	wg.Wait()
-	select {
-	case err := <-errCh:
-		return nil, err
-	default:
-		return compactComments(results), nil
-	}
+	return compactComments(results), nil
 }
 
 func (s *server) fetchCommentNode(ctx context.Context, id int, sem chan struct{}) (*commentResponse, error) {
@@ -773,8 +759,6 @@ func (s *server) fetchCommentNode(ctx context.Context, id int, sem chan struct{}
 	}
 
 	children := make([]*commentResponse, len(item.Kids))
-	errCh := make(chan error, 1)
-	var once sync.Once
 	var wg sync.WaitGroup
 	for i, childID := range item.Kids {
 		wg.Add(1)
@@ -782,9 +766,8 @@ func (s *server) fetchCommentNode(ctx context.Context, id int, sem chan struct{}
 			defer wg.Done()
 			child, childErr := s.fetchCommentNode(ctx, cid, sem)
 			if childErr != nil {
-				once.Do(func() {
-					errCh <- childErr
-				})
+				log.Printf("child comment fetch failed id=%d: %v", cid, childErr)
+				// Non-fatal: leave children[idx] as nil
 				return
 			}
 			children[idx] = child
@@ -792,13 +775,8 @@ func (s *server) fetchCommentNode(ctx context.Context, id int, sem chan struct{}
 	}
 	wg.Wait()
 
-	select {
-	case childErr := <-errCh:
-		return nil, childErr
-	default:
-		node.Kids = compactComments(children)
-		return node, nil
-	}
+	node.Kids = compactComments(children)
+	return node, nil
 }
 
 func (s *server) fetchFirebaseJSON(ctx context.Context, path string, dst any) error {
