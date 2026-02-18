@@ -1998,31 +1998,38 @@ function createCommentElement(state, item, depth) {
   const meta = document.createElement("div");
   meta.className = "comment-meta";
 
-  const bySpan = document.createElement("span");
-  bySpan.className = "meta-user";
-  bySpan.textContent = item.by ? `by ${item.by}` : "by unknown";
+  if (item.deleted || item.dead) {
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "comment-status";
+    statusSpan.textContent = item.deleted ? "[deleted]" : "[dead]";
+    meta.append(statusSpan);
+  } else {
+    const bySpan = document.createElement("span");
+    bySpan.className = "meta-user";
+    bySpan.textContent = item.by && item.by !== "unknown" ? item.by : "unknown";
 
-  const timeSpan = document.createElement("span");
-  timeSpan.className = "meta-time";
-  timeSpan.textContent = item.time ? `${timeAgo(item.time)} ago` : "";
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "meta-time";
+    timeSpan.textContent = item.time ? timeAgo(item.time) + " ago" : "";
 
-  meta.append(bySpan);
-  if (timeSpan.textContent) {
-    meta.append(timeSpan);
+    meta.append(bySpan);
+    if (timeSpan.textContent) {
+      meta.append(timeSpan);
+    }
   }
 
   const actions = document.createElement("div");
   actions.className = "comment-actions";
 
+  // Chevron expand/collapse toggle button — pill-shaped like feed picker
   const toggleButton = document.createElement("button");
   toggleButton.type = "button";
-  toggleButton.className = "btn";
+  toggleButton.className = "btn comment-toggle-btn";
   toggleButton.dataset.action = "toggle-comment";
   toggleButton.dataset.slot = "toggle";
-  toggleButton.textContent = "-";
+  toggleButton.innerHTML = `<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   toggleButton.setAttribute("aria-label", "Collapse comment");
   toggleButton.title = "Collapse comment";
-
   actions.appendChild(toggleButton);
 
   const text = document.createElement("div");
@@ -2035,7 +2042,7 @@ function createCommentElement(state, item, depth) {
   } else if (item.text) {
     text.innerHTML = sanitizeHNHTML(item.text);
   } else {
-    text.textContent = "[deleted]";
+    text.textContent = "[no text]";
   }
 
   const children = document.createElement("div");
@@ -2048,11 +2055,11 @@ function createCommentElement(state, item, depth) {
   if (normalizedKids.length) {
     const repliesButton = document.createElement("button");
     repliesButton.type = "button";
-    repliesButton.className = "btn";
+    repliesButton.className = "btn comment-replies-btn";
     repliesButton.dataset.action = "load-replies";
     repliesButton.dataset.slot = "replies";
     repliesButton.dataset.commentId = String(item.id);
-    repliesButton.textContent = String(normalizedKids.length);
+    repliesButton.innerHTML = `<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="replies-count">${normalizedKids.length}</span>`;
     repliesButton.setAttribute(
       "aria-label",
       `Show ${normalizedKids.length} ${normalizedKids.length === 1 ? "reply" : "replies"}`,
@@ -2234,7 +2241,10 @@ function wireCommentActions(state) {
 
       model.loaded = true;
       mountChildList(state, model.container, model.kids, model.depth, { auto: false });
-      actionEl.remove();
+      // Rotate chevron to show "open" state instead of removing the button
+      actionEl.classList.add("is-open");
+      actionEl.setAttribute("aria-label", "Replies loaded");
+      actionEl.disabled = true;
       return;
     }
 
@@ -2244,10 +2254,10 @@ function wireCommentActions(state) {
         return;
       }
       const isCollapsed = comment.classList.toggle("is-collapsed");
-      actionEl.textContent = isCollapsed ? "+" : "-";
       const nextLabel = isCollapsed ? "Expand comment" : "Collapse comment";
       actionEl.setAttribute("aria-label", nextLabel);
       actionEl.title = nextLabel;
+      // Chevron rotation is handled by CSS via .is-collapsed on the parent .comment
     }
   });
 }
