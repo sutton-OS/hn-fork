@@ -72,8 +72,6 @@ async function handleRouteChange() {
 async function renderRoute(route = parseRoute()) {
   abortCurrentViewLoad();
   teardownListSelection();
-  closePreview({ updateHash: false });
-  app.classList.remove("is-preview-open");
   app.dataset.view = "";
   app.innerHTML = "";
 
@@ -82,18 +80,13 @@ async function renderRoute(route = parseRoute()) {
     return;
   }
 
-  const targetPage = route.type === "preview" ? activeListPage : route.page;
-  await renderListPage(targetPage);
+  await renderListPage(route.page);
   applyListRoute(route);
 }
 
 function canHandleRouteInPlace(route) {
   if (app.dataset.view !== "list") {
     return false;
-  }
-
-  if (route.type === "preview") {
-    return true;
   }
 
   if (route.type !== "list") {
@@ -109,12 +102,9 @@ function canHandleRouteInPlace(route) {
 }
 
 function applyListRoute(route) {
-  if (route.type === "preview") {
-    openPreviewByUrl(route.url, { updateHash: false });
+  if (route.type !== "list") {
     return;
   }
-
-  closePreview({ updateHash: false });
 }
 
 function parseRoute() {
@@ -127,18 +117,6 @@ function parseRoute() {
   const pageMatch = hash.match(/^\/page\/(\d+)$/);
   if (pageMatch) {
     return { type: "list", page: Math.max(1, Number(pageMatch[1])) };
-  }
-
-  const previewMatch = hash.match(/^p=(.+)$/);
-  if (previewMatch) {
-    try {
-      const decoded = decodeURIComponent(previewMatch[1]);
-      const safeUrl = getSafeUrl(decoded);
-      if (safeUrl) {
-        return { type: "preview", url: safeUrl };
-      }
-    } catch {}
-    return { type: "list", page: 1 };
   }
 
   const storyMatch = hash.match(/^\/(?:item|story)\/(\d+)$/);
@@ -930,9 +908,9 @@ function openSelectedStory() {
     return;
   }
 
-  const preview = getPreviewDataFromLink(link);
-  if (preview) {
-    openPreview(preview, { updateHash: true });
+  const href = getSafeUrl(link.getAttribute("href"));
+  if (href) {
+    window.open(href, "_blank", "noopener,noreferrer");
     return;
   }
 
@@ -1479,44 +1457,6 @@ async function renderListPage(page) {
         ${topbar(loadingPager(page))}
         <section class="story-list"></section>
       </section>
-      <aside class="preview-pane" data-preview-pane aria-hidden="true">
-        <article class="preview-card">
-          <header class="preview-header">
-            <div class="preview-heading">
-              <h2 class="preview-title" data-preview-title>Story preview</h2>
-              <span class="preview-domain" data-preview-domain></span>
-            </div>
-            <div class="preview-actions">
-              <button class="btn" type="button" data-preview-close>Close</button>
-              <button class="btn" type="button" data-preview-reader aria-pressed="false">
-                Reader View
-              </button>
-              <a
-                class="btn"
-                data-preview-open
-                href=""
-                target="_blank"
-                rel="noopener noreferrer"
-              >Open in new tab</a>
-            </div>
-          </header>
-          <div class="preview-frame-wrap">
-            <iframe
-              class="preview-frame"
-              data-preview-frame
-              loading="lazy"
-              referrerpolicy="strict-origin-when-cross-origin"
-              sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-              title="Story preview"
-            ></iframe>
-            <p class="preview-loading" data-preview-loading hidden>Loading preview...</p>
-            <article class="preview-reader" data-preview-reader-content hidden></article>
-            <p class="preview-fallback" data-preview-fallback hidden>
-              This site may block embedding. Use Open in new tab.
-            </p>
-          </div>
-        </article>
-      </aside>
     `;
     wireThemeToggleButtons();
     wireFeedToggleButtons();
@@ -1524,22 +1464,6 @@ async function renderListPage(page) {
     const listEl = app.querySelector(".story-list");
     if (!listEl) {
       return;
-    }
-
-    const closePreviewButton = app.querySelector("[data-preview-close]");
-    if (closePreviewButton && !closePreviewButton.dataset.wired) {
-      closePreviewButton.dataset.wired = "true";
-      closePreviewButton.addEventListener("click", () => {
-        closePreview({ updateHash: true });
-      });
-    }
-
-    const readerViewButton = app.querySelector("[data-preview-reader]");
-    if (readerViewButton && !readerViewButton.dataset.wired) {
-      readerViewButton.dataset.wired = "true";
-      readerViewButton.addEventListener("click", () => {
-        toggleReaderView();
-      });
     }
 
     let start = (Math.max(1, page) - 1) * PAGE_SIZE;
@@ -1593,13 +1517,9 @@ async function renderListPage(page) {
     listEl.addEventListener("click", async (event) => {
       const titleLink = event.target.closest(".story-title a");
       if (titleLink && listEl.contains(titleLink)) {
-        event.preventDefault();
-        const preview = getPreviewDataFromLink(titleLink);
-        if (preview) {
-          if (preview.row) {
-            setSelectedStoryElement(preview.row);
-          }
-          openPreview(preview, { updateHash: true });
+        const storyRow = titleLink.closest(".story");
+        if (storyRow) {
+          setSelectedStoryElement(storyRow);
         }
         return;
       }
@@ -1698,25 +1618,23 @@ function renderStoryRow(story, index) {
 
   const domain = getDomain(story.url);
   const safeUrl = getSafeUrl(story.url);
-  const previewUrl = safeUrl || `https://news.ycombinator.com/item?id=${story.id}`;
-  const previewDomain = domain || getDomain(previewUrl);
+  const storyUrl = safeUrl || `https://news.ycombinator.com/item?id=${story.id}`;
   const commentsCount = story.descendants ?? 0;
   const localCommentsUrl = `#/item/${story.id}`;
   const storyTitleRaw = story.title || "Untitled";
   const storyTitle = escapeHTML(storyTitleRaw);
-  const escapedPreviewUrl = escapeHTML(previewUrl);
+  const escapedStoryUrl = escapeHTML(storyUrl);
   const titleContent = `
     <a
-      href="${escapedPreviewUrl}"
-      data-preview-url="${escapedPreviewUrl}"
-      data-preview-title="${escapeHTML(storyTitleRaw)}"
-      data-preview-domain="${escapeHTML(previewDomain)}"
+      href="${escapedStoryUrl}"
+      target="_blank"
+      rel="noopener noreferrer"
       data-story-id="${story.id}"
     ><span class="story-rank">${index}.</span><span class="story-title-text">${storyTitle}</span></a>
   `;
 
   return `
-    <article class="story" data-preview-url="${escapedPreviewUrl}">
+    <article class="story">
       <div class="story-title">
         ${titleContent}
         ${domain ? `<span class="domain">(${escapeHTML(domain)})</span>` : ""}
