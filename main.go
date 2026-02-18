@@ -23,7 +23,8 @@ import (
 
 const (
 	hnBaseURL           = "https://hacker-news.firebaseio.com/v0"
-	maxStoriesPerFeed   = 30
+	maxStoriesPerFeed   = 120
+	defaultStoriesLimit = 30
 	maxConcurrentFetch  = 8
 	firebaseTimeout     = 5 * time.Second
 	listCacheTTL        = 90 * time.Second
@@ -308,6 +309,29 @@ func (s *server) handleStories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	offset := 0
+	if rawOffset := strings.TrimSpace(r.URL.Query().Get("offset")); rawOffset != "" {
+		parsedOffset, err := strconv.Atoi(rawOffset)
+		if err != nil || parsedOffset < 0 {
+			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			return
+		}
+		offset = parsedOffset
+	}
+
+	limit := defaultStoriesLimit
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		if parsedLimit > maxStoriesPerFeed {
+			parsedLimit = maxStoriesPerFeed
+		}
+		limit = parsedLimit
+	}
+
 	ids, err := s.fetchStoryIDs(r.Context(), feed)
 	if err != nil {
 		log.Printf("story id fetch failed for feed=%s: %v", feed, err)
@@ -318,6 +342,16 @@ func (s *server) handleStories(w http.ResponseWriter, r *http.Request) {
 	if len(ids) > maxStoriesPerFeed {
 		ids = ids[:maxStoriesPerFeed]
 	}
+	if offset >= len(ids) {
+		writeJSON(w, http.StatusOK, []storyResponse{})
+		return
+	}
+
+	end := offset + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	ids = ids[offset:end]
 
 	items, err := s.fetchItemsConcurrently(r.Context(), ids)
 	if err != nil {

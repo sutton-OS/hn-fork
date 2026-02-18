@@ -1150,11 +1150,19 @@ function createTaskQueue(limit, { signal } = {}) {
     });
 }
 
-async function getStories(feed, { signal } = {}) {
+async function getStories(feed, { signal, offset = 0, limit = PAGE_SIZE } = {}) {
   const normalizedFeed = normalizeFeed(feed);
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Math.max(1, Number(limit) || PAGE_SIZE);
+
   try {
+    const params = new URLSearchParams({
+      feed: normalizedFeed,
+      offset: String(safeOffset),
+      limit: String(safeLimit),
+    });
     const payload = await fetchJSON(
-      `${STORIES_ENDPOINT}?feed=${encodeURIComponent(normalizedFeed)}`,
+      `${STORIES_ENDPOINT}?${params.toString()}`,
       {
         signal,
         errorPrefix: "Stories request failed",
@@ -1171,13 +1179,13 @@ async function getStories(feed, { signal } = {}) {
     signal,
     errorPrefix: "Stories fallback failed",
   });
-  const topIds = (Array.isArray(ids) ? ids : [])
+  const pageIds = (Array.isArray(ids) ? ids : [])
     .map((id) => Number(id))
     .filter((id) => Number.isInteger(id) && id > 0)
-    .slice(0, PAGE_SIZE);
+    .slice(safeOffset, safeOffset + safeLimit);
 
   const stories = await fetchInChunks(
-    topIds,
+    pageIds,
     FALLBACK_FETCH_CONCURRENCY,
     (id) =>
       fetchHNJSON(`item/${id}.json`, {
@@ -1367,17 +1375,6 @@ async function renderListPage() {
     initializeListSelection(listEl);
     applyListRoute(parseRoute());
 
-    const stories = await getStories(currentFeed, { signal: controller.signal });
-    if (controller.signal.aborted || currentViewController !== controller) {
-      return;
-    }
-
-    if (!stories.length) {
-      listStatus.hidden = false;
-      listStatus.textContent = "No stories available.";
-      return;
-    }
-
     const setListStatus = (value = "") => {
       const next = (value || "").trim();
       listStatus.hidden = !next;
@@ -1453,14 +1450,16 @@ async function renderListPage() {
     });
 
     let isLoadingBatch = false;
+    let hasMore = true;
     let nextBatchStart = 0;
+    const seenStoryIds = new Set();
 
     const loadNextBatch = async () => {
       if (
         isLoadingBatch ||
         controller.signal.aborted ||
         currentViewController !== controller ||
-        nextBatchStart >= stories.length
+        !hasMore
       ) {
         return;
       }
@@ -1468,32 +1467,66 @@ async function renderListPage() {
       isLoadingBatch = true;
       setListStatus("Loading stories...");
 
-      const batchStart = nextBatchStart;
-      const batchStories = stories.slice(batchStart, batchStart + PAGE_SIZE);
-      nextBatchStart += batchStories.length;
-
-      const slots = appendLoadingRows(listEl, batchStories.length, batchStart);
-      if (selectedStoryIndex < 0 && slots.length) {
-        selectedStoryIndex = 0;
-      }
-      applyListSelection({ scroll: false });
-
-      const replaceSlot = (slotIndex, html) => {
-        const current = slots[slotIndex];
-        if (!current || !current.isConnected) {
-          return;
-        }
-        const next = createElementFromHTML(html);
-        if (!next) {
-          return;
-        }
-        current.replaceWith(next);
-        slots[slotIndex] = next;
-        applyListSelection({ scroll: false });
-        applyListRoute(parseRoute());
-      };
-
       try {
+        const batchStart = nextBatchStart;
+        const fetchedStories = await getStories(currentFeed, {
+          signal: controller.signal,
+          offset: batchStart,
+          limit: PAGE_SIZE,
+        });
+        if (controller.signal.aborted || currentViewController !== controller) {
+          return;
+        }
+
+        if (!fetchedStories.length) {
+          hasMore = false;
+          teardownInfiniteLoading();
+          setListStatus(batchStart === 0 ? "No stories available." : "");
+          return;
+        }
+
+        const batchStories = fetchedStories.filter((story) => {
+          const storyId = Number(story?.id);
+          if (!Number.isFinite(storyId)) {
+            return true;
+          }
+          if (seenStoryIds.has(storyId)) {
+            return false;
+          }
+          seenStoryIds.add(storyId);
+          return true;
+        });
+
+        if (!batchStories.length) {
+          hasMore = false;
+          teardownInfiniteLoading();
+          setListStatus("");
+          return;
+        }
+
+        nextBatchStart += fetchedStories.length;
+
+        const slots = appendLoadingRows(listEl, batchStories.length, batchStart);
+        if (selectedStoryIndex < 0 && slots.length) {
+          selectedStoryIndex = 0;
+        }
+        applyListSelection({ scroll: false });
+
+        const replaceSlot = (slotIndex, html) => {
+          const current = slots[slotIndex];
+          if (!current || !current.isConnected) {
+            return;
+          }
+          const next = createElementFromHTML(html);
+          if (!next) {
+            return;
+          }
+          current.replaceWith(next);
+          slots[slotIndex] = next;
+          applyListSelection({ scroll: false });
+          applyListRoute(parseRoute());
+        };
+
         batchStories.forEach((story, index) => {
           if (controller.signal.aborted || currentViewController !== controller) {
             return;
@@ -1505,19 +1538,20 @@ async function renderListPage() {
           }
           replaceSlot(index, renderFailedStoryRow("unknown", rank));
         });
+
+        if (controller.signal.aborted || currentViewController !== controller) {
+          return;
+        }
+
+        if (fetchedStories.length < PAGE_SIZE) {
+          hasMore = false;
+          teardownInfiniteLoading();
+        }
+
+        setListStatus("");
       } finally {
         isLoadingBatch = false;
       }
-
-      if (controller.signal.aborted || currentViewController !== controller) {
-        return;
-      }
-
-      if (nextBatchStart >= stories.length) {
-        teardownInfiniteLoading();
-      }
-
-      setListStatus("");
     };
 
     if ("IntersectionObserver" in window) {

@@ -1,6 +1,8 @@
 const STORIES_ENDPOINT = "/api/stories";
 const ITEM_ENDPOINT = "/api/item";
+const HN_FALLBACK_BASE = "https://hacker-news.firebaseio.com/v0";
 const PAGE_SIZE = 30;
+const FALLBACK_FETCH_CONCURRENCY = 8;
 const THEME_STORAGE_KEY = "hn-fork:theme:v1";
 const FEED_STORAGE_KEY = "hn-fork:feed:v1";
 const COMMENTS_BATCH_SIZE = 30;
@@ -1043,11 +1045,11 @@ function teardownListSelection() {
 async function fetchJSON(url, { signal, errorPrefix = "Request failed" } = {}) {
   const response = await fetch(url, { signal });
   if (!response.ok) {
-    let message = `${errorPrefix}: ${response.status}`;
+    let message = `${errorPrefix}: ${response.status} (${url})`;
     try {
       const payload = await response.json();
       if (payload?.error) {
-        message = payload.error;
+        message = `${errorPrefix}: ${payload.error}`;
       }
     } catch {}
     throw new Error(message);
@@ -1063,6 +1065,31 @@ async function fetchJSON(url, { signal, errorPrefix = "Request failed" } = {}) {
   }
 
   return response.json();
+}
+
+function isNotFoundError(error) {
+  return /\b404\b/.test(String(error?.message || ""));
+}
+
+async function fetchHNJSON(path, { signal, errorPrefix = "HN request failed" } = {}) {
+  const response = await fetch(`${HN_FALLBACK_BASE}/${path}`, { signal });
+  if (!response.ok) {
+    throw new Error(`${errorPrefix}: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function fetchInChunks(items, limit, worker, { signal } = {}) {
+  const results = [];
+  for (let index = 0; index < items.length; index += limit) {
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
+    const chunk = items.slice(index, index + limit);
+    const batch = await Promise.all(chunk.map(worker));
+    results.push(...batch);
+  }
+  return results;
 }
 
 async function fetchThread(id, { signal } = {}) {
@@ -1123,16 +1150,52 @@ function createTaskQueue(limit, { signal } = {}) {
     });
 }
 
-async function getStories(feed, { signal } = {}) {
+async function getStories(feed, { signal, offset = 0, limit = PAGE_SIZE } = {}) {
   const normalizedFeed = normalizeFeed(feed);
-  const payload = await fetchJSON(
-    `${STORIES_ENDPOINT}?feed=${encodeURIComponent(normalizedFeed)}`,
-    {
-      signal,
-      errorPrefix: "Stories request failed",
-    },
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Math.max(1, Number(limit) || PAGE_SIZE);
+
+  try {
+    const params = new URLSearchParams({
+      feed: normalizedFeed,
+      offset: String(safeOffset),
+      limit: String(safeLimit),
+    });
+    const payload = await fetchJSON(
+      `${STORIES_ENDPOINT}?${params.toString()}`,
+      {
+        signal,
+        errorPrefix: "Stories request failed",
+      },
+    );
+    return Array.isArray(payload) ? payload : [];
+  } catch (error) {
+    if (isAbortError(error) || !isNotFoundError(error)) {
+      throw error;
+    }
+  }
+
+  const ids = await fetchHNJSON(`${normalizedFeed}stories.json`, {
+    signal,
+    errorPrefix: "Stories fallback failed",
+  });
+  const pageIds = (Array.isArray(ids) ? ids : [])
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .slice(safeOffset, safeOffset + safeLimit);
+
+  const stories = await fetchInChunks(
+    pageIds,
+    FALLBACK_FETCH_CONCURRENCY,
+    (id) =>
+      fetchHNJSON(`item/${id}.json`, {
+        signal,
+        errorPrefix: "Story fallback item failed",
+      }).catch(() => null),
+    { signal },
   );
-  return Array.isArray(payload) ? payload : [];
+
+  return stories.filter((story) => story && Number.isFinite(Number(story.id)));
 }
 
 async function getItem(id, { signal, forceRefresh = false } = {}) {
@@ -1142,10 +1205,22 @@ async function getItem(id, { signal, forceRefresh = false } = {}) {
   }
 
   void forceRefresh;
-  return fetchJSON(`${ITEM_ENDPOINT}?id=${numericId}`, {
+  try {
+    return await fetchJSON(`${ITEM_ENDPOINT}?id=${numericId}`, {
+      signal,
+      errorPrefix: "Item request failed",
+    });
+  } catch (error) {
+    if (isAbortError(error) || !isNotFoundError(error)) {
+      throw error;
+    }
+  }
+
+  const fallbackItem = await fetchHNJSON(`item/${numericId}.json`, {
     signal,
-    errorPrefix: "Item request failed",
+    errorPrefix: "Item fallback failed",
   });
+  return fallbackItem || null;
 }
 
 function getDomain(url) {
@@ -1300,17 +1375,6 @@ async function renderListPage() {
     initializeListSelection(listEl);
     applyListRoute(parseRoute());
 
-    const stories = await getStories(currentFeed, { signal: controller.signal });
-    if (controller.signal.aborted || currentViewController !== controller) {
-      return;
-    }
-
-    if (!stories.length) {
-      listStatus.hidden = false;
-      listStatus.textContent = "No stories available.";
-      return;
-    }
-
     const setListStatus = (value = "") => {
       const next = (value || "").trim();
       listStatus.hidden = !next;
@@ -1386,14 +1450,16 @@ async function renderListPage() {
     });
 
     let isLoadingBatch = false;
+    let hasMore = true;
     let nextBatchStart = 0;
+    const seenStoryIds = new Set();
 
     const loadNextBatch = async () => {
       if (
         isLoadingBatch ||
         controller.signal.aborted ||
         currentViewController !== controller ||
-        nextBatchStart >= stories.length
+        !hasMore
       ) {
         return;
       }
@@ -1401,32 +1467,66 @@ async function renderListPage() {
       isLoadingBatch = true;
       setListStatus("Loading stories...");
 
-      const batchStart = nextBatchStart;
-      const batchStories = stories.slice(batchStart, batchStart + PAGE_SIZE);
-      nextBatchStart += batchStories.length;
-
-      const slots = appendLoadingRows(listEl, batchStories.length, batchStart);
-      if (selectedStoryIndex < 0 && slots.length) {
-        selectedStoryIndex = 0;
-      }
-      applyListSelection({ scroll: false });
-
-      const replaceSlot = (slotIndex, html) => {
-        const current = slots[slotIndex];
-        if (!current || !current.isConnected) {
-          return;
-        }
-        const next = createElementFromHTML(html);
-        if (!next) {
-          return;
-        }
-        current.replaceWith(next);
-        slots[slotIndex] = next;
-        applyListSelection({ scroll: false });
-        applyListRoute(parseRoute());
-      };
-
       try {
+        const batchStart = nextBatchStart;
+        const fetchedStories = await getStories(currentFeed, {
+          signal: controller.signal,
+          offset: batchStart,
+          limit: PAGE_SIZE,
+        });
+        if (controller.signal.aborted || currentViewController !== controller) {
+          return;
+        }
+
+        if (!fetchedStories.length) {
+          hasMore = false;
+          teardownInfiniteLoading();
+          setListStatus(batchStart === 0 ? "No stories available." : "");
+          return;
+        }
+
+        const batchStories = fetchedStories.filter((story) => {
+          const storyId = Number(story?.id);
+          if (!Number.isFinite(storyId)) {
+            return true;
+          }
+          if (seenStoryIds.has(storyId)) {
+            return false;
+          }
+          seenStoryIds.add(storyId);
+          return true;
+        });
+
+        if (!batchStories.length) {
+          hasMore = false;
+          teardownInfiniteLoading();
+          setListStatus("");
+          return;
+        }
+
+        nextBatchStart += fetchedStories.length;
+
+        const slots = appendLoadingRows(listEl, batchStories.length, batchStart);
+        if (selectedStoryIndex < 0 && slots.length) {
+          selectedStoryIndex = 0;
+        }
+        applyListSelection({ scroll: false });
+
+        const replaceSlot = (slotIndex, html) => {
+          const current = slots[slotIndex];
+          if (!current || !current.isConnected) {
+            return;
+          }
+          const next = createElementFromHTML(html);
+          if (!next) {
+            return;
+          }
+          current.replaceWith(next);
+          slots[slotIndex] = next;
+          applyListSelection({ scroll: false });
+          applyListRoute(parseRoute());
+        };
+
         batchStories.forEach((story, index) => {
           if (controller.signal.aborted || currentViewController !== controller) {
             return;
@@ -1438,19 +1538,20 @@ async function renderListPage() {
           }
           replaceSlot(index, renderFailedStoryRow("unknown", rank));
         });
+
+        if (controller.signal.aborted || currentViewController !== controller) {
+          return;
+        }
+
+        if (fetchedStories.length < PAGE_SIZE) {
+          hasMore = false;
+          teardownInfiniteLoading();
+        }
+
+        setListStatus("");
       } finally {
         isLoadingBatch = false;
       }
-
-      if (controller.signal.aborted || currentViewController !== controller) {
-        return;
-      }
-
-      if (nextBatchStart >= stories.length) {
-        teardownInfiniteLoading();
-      }
-
-      setListStatus("");
     };
 
     if ("IntersectionObserver" in window) {
@@ -1488,6 +1589,7 @@ async function renderListPage() {
       <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
     `;
     wireThemeToggleButtons();
+    wireFeedToggleButtons();
   }
 }
 
