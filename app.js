@@ -18,6 +18,7 @@ const THEME_TERMINAL = "terminal";
 const THEME_DARK = "dark";
 const THEME_LIGHT = "light";
 const THEMES = [THEME_TERMINAL, THEME_DARK, THEME_LIGHT];
+const THEME_PICKER_THEMES = [THEME_LIGHT, THEME_DARK, THEME_TERMINAL];
 const FEED_BEST = "best";
 const FEED_TOP = "top";
 const FEED_NEW = "new";
@@ -218,28 +219,31 @@ function saveFeed(feed) {
   } catch {}
 }
 
-function getThemeLabel(theme = currentTheme) {
-  if (theme === THEME_DARK) {
-    return "icons/theme-moon.svg";
-  }
-  if (theme === THEME_LIGHT) {
-    return "icons/theme-sun.svg";
-  }
-  return "icons/theme-keyboard.svg";
-}
-
 function getThemeName(theme = currentTheme) {
-  if (theme === THEME_DARK) {
+  const normalized = normalizeTheme(theme);
+  if (normalized === THEME_DARK) {
     return "Dark";
   }
-  if (theme === THEME_LIGHT) {
+  if (normalized === THEME_LIGHT) {
     return "Light";
   }
   return "Terminal";
 }
 
-function getThemeButtonContent(theme = currentTheme) {
-  return `<img class="theme-toggle-icon" src="${getThemeLabel(theme)}" alt="" aria-hidden="true" />`;
+function getThemePickerButton(theme) {
+  const normalized = normalizeTheme(theme);
+  const isActive = normalized === currentTheme;
+  return `
+    <button
+      class="btn theme-option${isActive ? " is-active" : ""}"
+      type="button"
+      data-theme-option="${normalized}"
+      aria-pressed="${isActive ? "true" : "false"}"
+      aria-label="Theme: ${getThemeName(normalized)}"
+    >
+      <span class="theme-option-label">${getThemeName(normalized)}</span>
+    </button>
+  `;
 }
 
 function getFeedLabel(feed = currentFeed) {
@@ -282,11 +286,17 @@ function getFeedPickerButton(feed) {
 }
 
 function updateThemeToggleLabels() {
-  const name = getThemeName();
-  const content = getThemeButtonContent();
-  app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-    button.innerHTML = content;
-    button.setAttribute("aria-label", `Theme: ${name}`);
+  const normalized = normalizeTheme(currentTheme);
+  const themeIndex = Math.max(0, THEME_PICKER_THEMES.indexOf(normalized));
+  app.querySelectorAll("[data-theme-picker]").forEach((picker) => {
+    picker.style.setProperty("--theme-index", String(themeIndex));
+    picker.querySelectorAll("[data-theme-option]").forEach((button) => {
+      const optionTheme = normalizeTheme(button.getAttribute("data-theme-option"));
+      const isActive = optionTheme === normalized;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      button.setAttribute("aria-label", `Theme: ${getThemeName(optionTheme)}`);
+    });
   });
 }
 
@@ -326,13 +336,6 @@ function applyFeed(feed, { persist = false, rerender = false } = {}) {
   }
 }
 
-function toggleTheme() {
-  const currentIndex = THEMES.indexOf(currentTheme);
-  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % THEMES.length : 0;
-  const next = THEMES[nextIndex];
-  applyTheme(next, { persist: true });
-}
-
 function rerenderListForFeedChange() {
   if (app.dataset.view !== "list") {
     return;
@@ -345,13 +348,14 @@ function rerenderListForFeedChange() {
 }
 
 function wireThemeToggleButtons(root = app) {
-  root.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-    if (button.dataset.wired) {
+  root.querySelectorAll("[data-theme-option]").forEach((button) => {
+    if (button.dataset.themeWired) {
       return;
     }
-    button.dataset.wired = "true";
+    button.dataset.themeWired = "true";
     button.addEventListener("click", () => {
-      toggleTheme();
+      const next = button.getAttribute("data-theme-option");
+      applyTheme(next, { persist: true });
     });
   });
   updateThemeToggleLabels();
@@ -553,7 +557,9 @@ function setPreviewMode(elements, mode) {
   elements.reader.hidden = normalizedMode !== "reader";
   elements.commentsPanel.hidden = normalizedMode !== "comments";
   elements.iframe.hidden = normalizedMode !== "embed";
-  elements.readerButton.hidden = normalizedMode === "comments";
+  const hideActionsForComments = normalizedMode === "comments";
+  elements.readerButton.hidden = hideActionsForComments;
+  elements.openLink.hidden = hideActionsForComments;
   elements.readerButton.setAttribute(
     "aria-pressed",
     normalizedMode === "reader" ? "true" : "false",
@@ -839,7 +845,7 @@ async function openCommentsPreview(preview) {
       return false;
     }
     clearPreviewCommentsContent(elements, "Could not load comments.");
-    setPreviewFallbackMessage(elements, "Comments preview failed. Use Open thread.", {
+    setPreviewFallbackMessage(elements, "Comments preview failed.", {
       kind: "warning",
     });
     setPreviewLoadingVisible(elements, false);
@@ -1528,14 +1534,10 @@ function topbar(content) {
           <span class="feed-picker-slider" aria-hidden="true"></span>
           ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
         </div>
-        <button
-          class="btn theme-toggle"
-          type="button"
-          data-theme-toggle
-          aria-label="Theme: ${getThemeName()}"
-        >
-          ${getThemeButtonContent()}
-        </button>
+        <div class="theme-picker" role="group" aria-label="Theme" data-theme-picker>
+          <span class="theme-picker-slider" aria-hidden="true"></span>
+          ${THEME_PICKER_THEMES.map((theme) => getThemePickerButton(theme)).join("")}
+        </div>
       </div>
     </header>
   `;
