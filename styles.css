@@ -20,10 +20,10 @@
 }
 
 :root[data-theme="terminal"] {
-  /* Double the terminal column width while keeping other themes unchanged. */
-  --layout-scale: 1.68;
+  /* Match Bloomberg (dark) layout width exactly in terminal mode. */
+  --layout-scale: 0.7875;
   /* Increase type size to match the wider terminal layout. */
-  --bloomberg-scale: 1.4;
+  --bloomberg-scale: 0.98;
 }
 
 @font-face {
