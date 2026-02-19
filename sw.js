@@ -1,4 +1,4 @@
-const STATIC_CACHE = "hnx-static-v2";
+const STATIC_CACHE = "hnx-static-v3";   // ← just bump the number every time you want fresh deploys
 const API_CACHE = "hnx-api-v1";
 const STATIC_ASSETS = [
   "/",
