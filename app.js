@@ -3,7 +3,6 @@ const ITEM_ENDPOINT = "/api/item";
 const HN_FALLBACK_BASE = "https://hacker-news.firebaseio.com/v0";
 const PAGE_SIZE = 30;
 const FALLBACK_FETCH_CONCURRENCY = 8;
-const THEME_STORAGE_KEY = "hn-fork:theme:v1";
 const FEED_STORAGE_KEY = "hn-fork:feed:v1";
 const COMMENTS_BATCH_SIZE = 30;
 const COMMENTS_AUTO_RENDER_LIMIT = 200;
@@ -14,11 +13,6 @@ const PREVIEW_EMBED_BLOCKED_MESSAGE =
 const READER_ENDPOINT = "/api/reader";
 const THREAD_ENDPOINT = "/api/thread";
 const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
-const THEME_TERMINAL = "terminal";
-const THEME_DARK = "dark";
-const THEME_LIGHT = "light";
-const THEMES = [THEME_TERMINAL, THEME_DARK, THEME_LIGHT];
-const THEME_PICKER_THEMES = [THEME_LIGHT, THEME_DARK, THEME_TERMINAL];
 const FEED_BEST = "best";
 const FEED_TOP = "top";
 const FEED_NEW = "new";
@@ -31,7 +25,6 @@ const unescape = document.createElement("textarea");
 let currentViewController = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
-let currentTheme = THEME_LIGHT;
 let currentFeed = FEED_BEST;
 const previewState = {
   activeUrl: "",
@@ -45,7 +38,6 @@ let readabilityModulePromise = null;
 const commentActionHandlers = new WeakMap();
 const preloadedStoriesState = readPreloadedStories();
 
-applyTheme(loadSavedTheme());
 applyFeed(loadSavedFeed());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("load", handleRouteChange);
@@ -175,27 +167,8 @@ function escapeHTML(value) {
   return unescape.innerHTML;
 }
 
-function normalizeTheme(theme) {
-  if (theme === "bloomberg") {
-    return THEME_DARK;
-  }
-  if (theme === "bloomberg-light") {
-    return THEME_LIGHT;
-  }
-  return THEMES.includes(theme) ? theme : THEME_LIGHT;
-}
-
 function normalizeFeed(feed) {
   return FEEDS.includes(feed) ? feed : FEED_BEST;
-}
-
-function loadSavedTheme() {
-  try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    return normalizeTheme(saved);
-  } catch {
-    return THEME_LIGHT;
-  }
 }
 
 function loadSavedFeed() {
@@ -207,43 +180,10 @@ function loadSavedFeed() {
   }
 }
 
-function saveTheme(theme) {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, normalizeTheme(theme));
-  } catch {}
-}
-
 function saveFeed(feed) {
   try {
     localStorage.setItem(FEED_STORAGE_KEY, normalizeFeed(feed));
   } catch {}
-}
-
-function getThemeName(theme = currentTheme) {
-  const normalized = normalizeTheme(theme);
-  if (normalized === THEME_DARK) {
-    return "Dark";
-  }
-  if (normalized === THEME_LIGHT) {
-    return "Light";
-  }
-  return "Terminal";
-}
-
-function getThemePickerButton(theme) {
-  const normalized = normalizeTheme(theme);
-  const isActive = normalized === currentTheme;
-  return `
-    <button
-      class="btn theme-option${isActive ? " is-active" : ""}"
-      type="button"
-      data-theme-option="${normalized}"
-      aria-pressed="${isActive ? "true" : "false"}"
-      aria-label="Theme: ${getThemeName(normalized)}"
-    >
-      <span class="theme-option-label">${getThemeName(normalized)}</span>
-    </button>
-  `;
 }
 
 function getFeedLabel(feed = currentFeed) {
@@ -257,17 +197,6 @@ function getFeedLabel(feed = currentFeed) {
   return "Best";
 }
 
-function getFeedIcon(feed = currentFeed) {
-  const normalized = normalizeFeed(feed);
-  if (normalized === FEED_TOP) {
-    return "icons/feed-flame.svg";
-  }
-  if (normalized === FEED_NEW) {
-    return "icons/feed-activity.svg";
-  }
-  return "icons/feed-trophy.svg";
-}
-
 function getFeedPickerButton(feed) {
   const normalized = normalizeFeed(feed);
   const isActive = normalized === currentFeed;
@@ -279,32 +208,14 @@ function getFeedPickerButton(feed) {
       aria-pressed="${isActive ? "true" : "false"}"
       aria-label="Feed: ${getFeedLabel(normalized)}"
     >
-      <img class="feed-option-icon" src="${getFeedIcon(normalized)}" alt="" aria-hidden="true" />
       <span class="feed-option-label">${getFeedLabel(normalized)}</span>
     </button>
   `;
 }
 
-function updateThemeToggleLabels() {
-  const normalized = normalizeTheme(currentTheme);
-  const themeIndex = Math.max(0, THEME_PICKER_THEMES.indexOf(normalized));
-  app.querySelectorAll("[data-theme-picker]").forEach((picker) => {
-    picker.style.setProperty("--theme-index", String(themeIndex));
-    picker.querySelectorAll("[data-theme-option]").forEach((button) => {
-      const optionTheme = normalizeTheme(button.getAttribute("data-theme-option"));
-      const isActive = optionTheme === normalized;
-      button.classList.toggle("is-active", isActive);
-      button.setAttribute("aria-pressed", isActive ? "true" : "false");
-      button.setAttribute("aria-label", `Theme: ${getThemeName(optionTheme)}`);
-    });
-  });
-}
-
 function updateFeedToggleLabels() {
   const normalized = normalizeFeed(currentFeed);
-  const feedIndex = Math.max(0, FEEDS.indexOf(normalized));
   app.querySelectorAll("[data-feed-picker]").forEach((picker) => {
-    picker.style.setProperty("--feed-index", String(feedIndex));
     picker.querySelectorAll("[data-feed-option]").forEach((button) => {
       const optionFeed = normalizeFeed(button.getAttribute("data-feed-option"));
       const isActive = optionFeed === normalized;
@@ -312,15 +223,6 @@ function updateFeedToggleLabels() {
       button.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
   });
-}
-
-function applyTheme(theme, { persist = false } = {}) {
-  currentTheme = normalizeTheme(theme);
-  document.documentElement.dataset.theme = currentTheme;
-  if (persist) {
-    saveTheme(currentTheme);
-  }
-  updateThemeToggleLabels();
 }
 
 function applyFeed(feed, { persist = false, rerender = false } = {}) {
@@ -345,20 +247,6 @@ function rerenderListForFeedChange() {
     window.location.hash = "/";
   }
   void renderRoute({ type: "list" });
-}
-
-function wireThemeToggleButtons(root = app) {
-  root.querySelectorAll("[data-theme-option]").forEach((button) => {
-    if (button.dataset.themeWired) {
-      return;
-    }
-    button.dataset.themeWired = "true";
-    button.addEventListener("click", () => {
-      const next = button.getAttribute("data-theme-option");
-      applyTheme(next, { persist: true });
-    });
-  });
-  updateThemeToggleLabels();
 }
 
 function wireFeedToggleButtons(root = app) {
@@ -1531,12 +1419,7 @@ function topbar(content) {
       <div class="topbar-actions">
         ${rightContent}
         <div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
-          <span class="feed-picker-slider" aria-hidden="true"></span>
           ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
-        </div>
-        <div class="theme-picker" role="group" aria-label="Theme" data-theme-picker>
-          <span class="theme-picker-slider" aria-hidden="true"></span>
-          ${THEME_PICKER_THEMES.map((theme) => getThemePickerButton(theme)).join("")}
         </div>
       </div>
     </header>
@@ -1657,7 +1540,6 @@ async function renderListPage() {
         </div>
       </aside>
     `;
-    wireThemeToggleButtons();
     wireFeedToggleButtons();
     wirePreviewPaneActions();
 
@@ -1914,7 +1796,6 @@ async function renderListPage() {
       ${topbar("")}
       <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
     `;
-    wireThemeToggleButtons();
     wireFeedToggleButtons();
   }
 }
@@ -2550,7 +2431,6 @@ async function renderStoryPage(id) {
       ${topbar('<a class="btn" href="#/">back</a>')}
       <p class="status">Invalid story id.</p>
     `;
-    wireThemeToggleButtons();
     wireFeedToggleButtons();
     return;
   }
@@ -2570,7 +2450,6 @@ async function renderStoryPage(id) {
       <div class="comment-children" data-comments-root></div>
     </section>
   `;
-  wireThemeToggleButtons();
   wireFeedToggleButtons();
 
   const detailSlot = app.querySelector(".story-detail");

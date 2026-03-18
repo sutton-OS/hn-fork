@@ -3,7 +3,6 @@ const ITEM_ENDPOINT = "/api/item";
 const HN_FALLBACK_BASE = "https://hacker-news.firebaseio.com/v0";
 const PAGE_SIZE = 30;
 const FALLBACK_FETCH_CONCURRENCY = 8;
-const THEME_STORAGE_KEY = "hn-fork:theme:v1";
 const FEED_STORAGE_KEY = "hn-fork:feed:v1";
 const COMMENTS_BATCH_SIZE = 30;
 const COMMENTS_AUTO_RENDER_LIMIT = 200;
@@ -14,10 +13,6 @@ const PREVIEW_EMBED_BLOCKED_MESSAGE =
 const READER_ENDPOINT = "/api/reader";
 const THREAD_ENDPOINT = "/api/thread";
 const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
-const THEME_TERMINAL = "terminal";
-const THEME_DARK = "dark";
-const THEME_LIGHT = "light";
-const THEMES = [THEME_TERMINAL, THEME_DARK, THEME_LIGHT];
 const FEED_BEST = "best";
 const FEED_TOP = "top";
 const FEED_NEW = "new";
@@ -30,7 +25,6 @@ const unescape = document.createElement("textarea");
 let currentViewController = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
-let currentTheme = THEME_LIGHT;
 let currentFeed = FEED_BEST;
 const previewState = {
   activeUrl: "",
@@ -44,7 +38,6 @@ let readabilityModulePromise = null;
 const commentActionHandlers = new WeakMap();
 const preloadedStoriesState = readPreloadedStories();
 
-applyTheme(loadSavedTheme());
 applyFeed(loadSavedFeed());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("load", handleRouteChange);
@@ -174,27 +167,8 @@ function escapeHTML(value) {
   return unescape.innerHTML;
 }
 
-function normalizeTheme(theme) {
-  if (theme === "bloomberg") {
-    return THEME_DARK;
-  }
-  if (theme === "bloomberg-light") {
-    return THEME_LIGHT;
-  }
-  return THEMES.includes(theme) ? theme : THEME_LIGHT;
-}
-
 function normalizeFeed(feed) {
   return FEEDS.includes(feed) ? feed : FEED_BEST;
-}
-
-function loadSavedTheme() {
-  try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    return normalizeTheme(saved);
-  } catch {
-    return THEME_LIGHT;
-  }
 }
 
 function loadSavedFeed() {
@@ -206,40 +180,10 @@ function loadSavedFeed() {
   }
 }
 
-function saveTheme(theme) {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, normalizeTheme(theme));
-  } catch {}
-}
-
 function saveFeed(feed) {
   try {
     localStorage.setItem(FEED_STORAGE_KEY, normalizeFeed(feed));
   } catch {}
-}
-
-function getThemeLabel(theme = currentTheme) {
-  if (theme === THEME_DARK) {
-    return "icons/theme-moon.svg";
-  }
-  if (theme === THEME_LIGHT) {
-    return "icons/theme-sun.svg";
-  }
-  return "icons/theme-keyboard.svg";
-}
-
-function getThemeName(theme = currentTheme) {
-  if (theme === THEME_DARK) {
-    return "Dark";
-  }
-  if (theme === THEME_LIGHT) {
-    return "Light";
-  }
-  return "Terminal";
-}
-
-function getThemeButtonContent(theme = currentTheme) {
-  return `<img class="theme-toggle-icon" src="${getThemeLabel(theme)}" alt="" aria-hidden="true" />`;
 }
 
 function getFeedLabel(feed = currentFeed) {
@@ -253,17 +197,6 @@ function getFeedLabel(feed = currentFeed) {
   return "Best";
 }
 
-function getFeedIcon(feed = currentFeed) {
-  const normalized = normalizeFeed(feed);
-  if (normalized === FEED_TOP) {
-    return "icons/feed-flame.svg";
-  }
-  if (normalized === FEED_NEW) {
-    return "icons/feed-activity.svg";
-  }
-  return "icons/feed-trophy.svg";
-}
-
 function getFeedPickerButton(feed) {
   const normalized = normalizeFeed(feed);
   const isActive = normalized === currentFeed;
@@ -275,26 +208,14 @@ function getFeedPickerButton(feed) {
       aria-pressed="${isActive ? "true" : "false"}"
       aria-label="Feed: ${getFeedLabel(normalized)}"
     >
-      <img class="feed-option-icon" src="${getFeedIcon(normalized)}" alt="" aria-hidden="true" />
       <span class="feed-option-label">${getFeedLabel(normalized)}</span>
     </button>
   `;
 }
 
-function updateThemeToggleLabels() {
-  const name = getThemeName();
-  const content = getThemeButtonContent();
-  app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-    button.innerHTML = content;
-    button.setAttribute("aria-label", `Theme: ${name}`);
-  });
-}
-
 function updateFeedToggleLabels() {
   const normalized = normalizeFeed(currentFeed);
-  const feedIndex = Math.max(0, FEEDS.indexOf(normalized));
   app.querySelectorAll("[data-feed-picker]").forEach((picker) => {
-    picker.style.setProperty("--feed-index", String(feedIndex));
     picker.querySelectorAll("[data-feed-option]").forEach((button) => {
       const optionFeed = normalizeFeed(button.getAttribute("data-feed-option"));
       const isActive = optionFeed === normalized;
@@ -302,15 +223,6 @@ function updateFeedToggleLabels() {
       button.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
   });
-}
-
-function applyTheme(theme, { persist = false } = {}) {
-  currentTheme = normalizeTheme(theme);
-  document.documentElement.dataset.theme = currentTheme;
-  if (persist) {
-    saveTheme(currentTheme);
-  }
-  updateThemeToggleLabels();
 }
 
 function applyFeed(feed, { persist = false, rerender = false } = {}) {
@@ -326,13 +238,6 @@ function applyFeed(feed, { persist = false, rerender = false } = {}) {
   }
 }
 
-function toggleTheme() {
-  const currentIndex = THEMES.indexOf(currentTheme);
-  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % THEMES.length : 0;
-  const next = THEMES[nextIndex];
-  applyTheme(next, { persist: true });
-}
-
 function rerenderListForFeedChange() {
   if (app.dataset.view !== "list") {
     return;
@@ -342,19 +247,6 @@ function rerenderListForFeedChange() {
     window.location.hash = "/";
   }
   void renderRoute({ type: "list" });
-}
-
-function wireThemeToggleButtons(root = app) {
-  root.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-    if (button.dataset.wired) {
-      return;
-    }
-    button.dataset.wired = "true";
-    button.addEventListener("click", () => {
-      toggleTheme();
-    });
-  });
-  updateThemeToggleLabels();
 }
 
 function wireFeedToggleButtons(root = app) {
@@ -553,7 +445,9 @@ function setPreviewMode(elements, mode) {
   elements.reader.hidden = normalizedMode !== "reader";
   elements.commentsPanel.hidden = normalizedMode !== "comments";
   elements.iframe.hidden = normalizedMode !== "embed";
-  elements.readerButton.hidden = normalizedMode === "comments";
+  const hideActionsForComments = normalizedMode === "comments";
+  elements.readerButton.hidden = hideActionsForComments;
+  elements.openLink.hidden = hideActionsForComments;
   elements.readerButton.setAttribute(
     "aria-pressed",
     normalizedMode === "reader" ? "true" : "false",
@@ -839,7 +733,7 @@ async function openCommentsPreview(preview) {
       return false;
     }
     clearPreviewCommentsContent(elements, "Could not load comments.");
-    setPreviewFallbackMessage(elements, "Comments preview failed. Use Open thread.", {
+    setPreviewFallbackMessage(elements, "Comments preview failed.", {
       kind: "warning",
     });
     setPreviewLoadingVisible(elements, false);
@@ -1525,17 +1419,8 @@ function topbar(content) {
       <div class="topbar-actions">
         ${rightContent}
         <div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
-          <span class="feed-picker-slider" aria-hidden="true"></span>
           ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
         </div>
-        <button
-          class="btn theme-toggle"
-          type="button"
-          data-theme-toggle
-          aria-label="Theme: ${getThemeName()}"
-        >
-          ${getThemeButtonContent()}
-        </button>
       </div>
     </header>
   `;
@@ -1655,7 +1540,6 @@ async function renderListPage() {
         </div>
       </aside>
     `;
-    wireThemeToggleButtons();
     wireFeedToggleButtons();
     wirePreviewPaneActions();
 
@@ -1912,7 +1796,6 @@ async function renderListPage() {
       ${topbar("")}
       <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
     `;
-    wireThemeToggleButtons();
     wireFeedToggleButtons();
   }
 }
@@ -2268,22 +2151,30 @@ function createCommentElement(state, item, depth) {
   const meta = document.createElement("div");
   meta.className = "comment-meta";
 
-  const bySpan = document.createElement("span");
-  bySpan.className = "meta-user";
-  bySpan.textContent = item.by ? `by ${item.by}` : "by unknown";
+  if (item.deleted || item.dead) {
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "comment-status";
+    statusSpan.textContent = item.deleted ? "[deleted]" : "[dead]";
+    meta.append(statusSpan);
+  } else {
+    const bySpan = document.createElement("span");
+    bySpan.className = "meta-user";
+    bySpan.textContent = item.by && item.by !== "unknown" ? item.by : "unknown";
 
-  const timeSpan = document.createElement("span");
-  timeSpan.className = "meta-time";
-  timeSpan.textContent = item.time ? `${timeAgo(item.time)} ago` : "";
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "meta-time";
+    timeSpan.textContent = item.time ? timeAgo(item.time) + " ago" : "";
 
-  meta.append(bySpan);
-  if (timeSpan.textContent) {
-    meta.append(timeSpan);
+    meta.append(bySpan);
+    if (timeSpan.textContent) {
+      meta.append(timeSpan);
+    }
   }
 
   const actions = document.createElement("div");
   actions.className = "comment-actions";
 
+  // Chevron expand/collapse toggle button — pill-shaped like feed picker
   const toggleButton = document.createElement("button");
   toggleButton.type = "button";
   toggleButton.className = "btn comment-toggle-btn";
@@ -2292,7 +2183,6 @@ function createCommentElement(state, item, depth) {
   toggleButton.innerHTML = `<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   toggleButton.setAttribute("aria-label", "Collapse comment");
   toggleButton.title = "Collapse comment";
-
   actions.appendChild(toggleButton);
 
   const text = document.createElement("div");
@@ -2305,7 +2195,7 @@ function createCommentElement(state, item, depth) {
   } else if (item.text) {
     text.innerHTML = sanitizeHNHTML(item.text);
   } else {
-    text.textContent = "[deleted]";
+    text.textContent = "[no text]";
   }
 
   const children = document.createElement("div");
@@ -2318,11 +2208,11 @@ function createCommentElement(state, item, depth) {
   if (normalizedKids.length) {
     const repliesButton = document.createElement("button");
     repliesButton.type = "button";
-    repliesButton.className = "btn";
+    repliesButton.className = "btn comment-replies-btn";
     repliesButton.dataset.action = "load-replies";
     repliesButton.dataset.slot = "replies";
     repliesButton.dataset.commentId = String(item.id);
-    repliesButton.textContent = String(normalizedKids.length);
+    repliesButton.innerHTML = `<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="replies-count">${normalizedKids.length}</span>`;
     repliesButton.setAttribute(
       "aria-label",
       `Show ${normalizedKids.length} ${normalizedKids.length === 1 ? "reply" : "replies"}`,
@@ -2509,7 +2399,10 @@ function wireCommentActions(state) {
 
       model.loaded = true;
       mountChildList(state, model.container, model.kids, model.depth, { auto: false });
-      actionEl.remove();
+      // Rotate chevron to show "open" state instead of removing the button
+      actionEl.classList.add("is-open");
+      actionEl.setAttribute("aria-label", "Replies loaded");
+      actionEl.disabled = true;
       return;
     }
 
@@ -2522,6 +2415,7 @@ function wireCommentActions(state) {
       const nextLabel = isCollapsed ? "Expand comment" : "Collapse comment";
       actionEl.setAttribute("aria-label", nextLabel);
       actionEl.title = nextLabel;
+      // Chevron rotation is handled by CSS via .is-collapsed on the parent .comment
     }
   };
 
@@ -2537,7 +2431,6 @@ async function renderStoryPage(id) {
       ${topbar('<a class="btn" href="#/">back</a>')}
       <p class="status">Invalid story id.</p>
     `;
-    wireThemeToggleButtons();
     wireFeedToggleButtons();
     return;
   }
@@ -2557,7 +2450,6 @@ async function renderStoryPage(id) {
       <div class="comment-children" data-comments-root></div>
     </section>
   `;
-  wireThemeToggleButtons();
   wireFeedToggleButtons();
 
   const detailSlot = app.querySelector(".story-detail");
