@@ -1808,8 +1808,6 @@ function renderStoryRow(story, index) {
   const domain = getDomain(story.url);
   const safeUrl = getSafeUrl(story.url);
   const storyUrl = safeUrl || `https://news.ycombinator.com/item?id=${story.id}`;
-  const commentsCount = story.descendants ?? 0;
-  const localCommentsUrl = `#/item/${story.id}`;
   const storyTitleRaw = story.title || "Untitled";
   const storyTitle = escapeHTML(storyTitleRaw);
   const escapedStoryDomain = escapeHTML(domain);
@@ -1830,18 +1828,7 @@ function renderStoryRow(story, index) {
         ${domain ? `<span class="domain">(${escapedStoryDomain})</span>` : ""}
       </div>
       <div class="story-meta">
-        <span class="meta-points">${story.score ?? 0} points</span>
-        <span class="meta-user">by ${escapeHTML(story.by || "unknown")}</span>
         <span class="meta-time">${timeAgo(story.time)} ago</span>
-        <span class="meta-comments">
-          <a
-            href="${localCommentsUrl}"
-            data-comments-preview
-            data-story-id="${story.id}"
-            data-story-title="${storyTitle}"
-            data-story-domain="${escapedStoryDomain}"
-          >${commentsCount} comments</a>
-        </span>
       </div>
     </article>
   `;
@@ -2008,7 +1995,6 @@ function sanitizeReaderHTML(value, baseUrl) {
 function renderStoryDetail(story) {
   const domain = getDomain(story.url);
   const safeUrl = getSafeUrl(story.url);
-  const hnUrl = `https://news.ycombinator.com/item?id=${story.id}`;
   const title = escapeHTML(story.title || "Untitled");
   const storyText = story.text ? sanitizeHNHTML(story.text) : "";
 
@@ -2019,10 +2005,7 @@ function renderStoryDetail(story) {
         ${domain ? `<span class="domain">(${escapeHTML(domain)})</span>` : ""}
       </div>
       <div class="story-meta">
-        <span class="meta-points">${story.score ?? 0} points</span>
-        <span class="meta-user">by ${escapeHTML(story.by || "unknown")}</span>
         <span class="meta-time">${timeAgo(story.time)} ago</span>
-        <span><a href="${hnUrl}" target="_blank" rel="noopener noreferrer">original thread</a></span>
       </div>
       ${storyText ? `<div class="story-text">${storyText}</div>` : ""}
     </article>

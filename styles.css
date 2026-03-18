@@ -264,14 +264,19 @@ iframe {
 }
 
 .feed-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   border: 0;
   border-radius: 12px;
   background: transparent;
   color: var(--muted);
-  min-height: 32px;
-  padding: 0.48rem 0.85rem;
+  min-height: 34px;
+  padding: 0.5rem 0.75rem;
   font-size: 0.76rem;
   letter-spacing: 0.01em;
+  text-align: center;
 }
 
 .feed-option:hover {
@@ -286,6 +291,8 @@ iframe {
 }
 
 .feed-option-label {
+  display: block;
+  width: 100%;
   line-height: 1;
 }
 
