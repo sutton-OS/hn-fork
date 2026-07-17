@@ -223,11 +223,7 @@ html[data-theme="dark"] .app {
   justify-content: flex-start;
   gap: 8px;
   min-width: 0;
-  flex: 0 1 auto;
-}
-
-.topbar-start:empty {
-  display: none;
+  flex: 1 1 auto;
 }
 
 .topbar-actions {
@@ -235,7 +231,7 @@ html[data-theme="dark"] .app {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   margin-left: auto;
 }
 
@@ -733,24 +729,22 @@ html[data-theme="dark"] .app {
 
 @media (max-width: 719px) {
   .topbar {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
     gap: 10px;
   }
 
   .topbar-start {
-    width: 100%;
+    min-width: 0;
     justify-content: flex-start;
   }
 
   .topbar-actions {
-    width: 100%;
-    margin-left: 0;
+    margin-left: auto;
     justify-content: flex-end;
   }
 
   .feed-picker {
-    flex: 1;
     min-width: 0;
   }
 }

@@ -837,15 +837,19 @@ function timeAgo(unixSeconds) {
 
 function topbar(content) {
   const leftContent = (content ?? "").trim();
+  // List: feed picker on the left. Story/comments: back replaces the feeds.
+  const startInner = leftContent
+    ? leftContent
+    : `<div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
+          ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
+        </div>`;
+
   return `
     <header class="topbar">
       <div class="topbar-start">
-        ${leftContent || ""}
+        ${startInner}
       </div>
       <div class="topbar-actions">
-        <div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
-          ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
-        </div>
         <button
           class="theme-toggle"
           type="button"
