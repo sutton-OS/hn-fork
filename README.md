@@ -36,9 +36,18 @@ python3 -m http.server 8080 -d public
 
 Deploy on Vercel. Static files live in `public/`, and serverless endpoints live in `api/`. There is no build step.
 
-## Keyboard (list view)
+## Keyboard
+
+**List view**
 
 - `j` / `k` or arrows — move selection
 - `Enter` — open article
 - `c` — open discussion
 - `g` / `G` — first / last story
+
+**Story / comments**
+
+- `j` / `k` or arrows — move comment selection
+- `Enter` — expand replies on selected comment
+- `h` — collapse / expand selected comment
+- `g` / `G` — first / last visible comment

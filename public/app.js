@@ -2,16 +2,23 @@ import DOMPurify from "./vendor/dompurify.es.mjs";
 
 const STORIES_ENDPOINT = "/api/stories";
 const ITEM_ENDPOINT = "/api/item";
+const THREAD_ENDPOINT = "/api/thread";
 const PAGE_SIZE = 30;
 const INITIAL_PAGE_SIZE = 12;
-const COMMENTS_BATCH_SIZE = 30;
-const COMMENTS_AUTO_RENDER_LIMIT = 200;
-const THREAD_ENDPOINT = "/api/thread";
+/** Direct replies fetched per expand / root page (server-side page size). */
+const COMMENTS_PAGE_SIZE = 40;
+/** DOM nodes mounted per animation frame within a page. */
+const COMMENTS_DOM_BATCH = 20;
+/** Visual indent cap — deeper threads stay readable. */
+const MAX_COMMENT_DEPTH = 6;
+/** px — clamp long comment bodies past this height. */
+const COMMENT_CLAMP_PX = 168;
 const FEED_BEST = "best";
 const FEED_TOP = "top";
 const FEED_NEW = "new";
 const FEEDS = [FEED_BEST, FEED_TOP, FEED_NEW];
 const LIST_VISIBLE_REFRESH_AFTER_MS = 60 * 1000;
+const THREAD_PREFETCH_MAX = 24;
 const SANITIZE_ALLOWED_TAGS = [
   "a",
   "b",
@@ -35,9 +42,13 @@ const unescape = document.createElement("textarea");
 let currentViewController = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
+let storyKeyboardHandler = null;
+let selectedCommentIndex = -1;
 let currentFeed = FEED_BEST;
 let listHiddenAt = 0;
 const commentActionHandlers = new WeakMap();
+/** @type {Map<string, Promise<unknown>>} */
+const threadPrefetchCache = new Map();
 
 // Always start dark; theme/feed are session-only (not persisted).
 applyTheme("dark");
@@ -255,6 +266,7 @@ function abortCurrentViewLoad() {
     currentViewController.abort();
     currentViewController = null;
   }
+  teardownStoryKeyboard();
 }
 
 function navigateTo(pathname) {
@@ -588,16 +600,100 @@ async function fetchJSON(
   return response.json();
 }
 
-async function fetchThread(id, { signal } = {}) {
+async function fetchThread(
+  id,
+  { signal, offset = 0, limit = COMMENTS_PAGE_SIZE } = {},
+) {
   const numericId = Number(id);
   if (!Number.isInteger(numericId) || numericId <= 0) {
     throw new Error("Invalid story id.");
   }
 
-  return fetchJSON(`${THREAD_ENDPOINT}?id=${numericId}`, {
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Math.max(1, Math.min(Number(limit) || COMMENTS_PAGE_SIZE, 80));
+  const cacheKey = `${numericId}:${safeOffset}:${safeLimit}`;
+
+  if (safeOffset === 0 && threadPrefetchCache.has(cacheKey)) {
+    try {
+      const payload = await threadPrefetchCache.get(cacheKey);
+      if (signal?.aborted) {
+        throw createAbortError();
+      }
+      return payload;
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted) {
+        throw error;
+      }
+    }
+  }
+
+  const params = new URLSearchParams({
+    id: String(numericId),
+    offset: String(safeOffset),
+    limit: String(safeLimit),
+  });
+
+  return fetchJSON(`${THREAD_ENDPOINT}?${params.toString()}`, {
     signal,
+    cache: "no-store",
     errorPrefix: "Thread request failed",
   });
+}
+
+function prefetchThread(id, { limit = COMMENTS_PAGE_SIZE } = {}) {
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    return null;
+  }
+
+  const cacheKey = `${numericId}:0:${limit}`;
+  if (threadPrefetchCache.has(cacheKey)) {
+    return threadPrefetchCache.get(cacheKey);
+  }
+
+  const promise = fetchJSON(
+    `${THREAD_ENDPOINT}?id=${numericId}&offset=0&limit=${limit}`,
+    {
+      cache: "default",
+      errorPrefix: "Thread prefetch failed",
+    },
+  ).catch((error) => {
+    threadPrefetchCache.delete(cacheKey);
+    throw error;
+  });
+
+  threadPrefetchCache.set(cacheKey, promise);
+  while (threadPrefetchCache.size > THREAD_PREFETCH_MAX) {
+    const oldest = threadPrefetchCache.keys().next().value;
+    threadPrefetchCache.delete(oldest);
+  }
+  return promise;
+}
+
+function wireDiscussionPrefetch(root = app) {
+  if (!root || root.dataset.prefetchWired === "true") {
+    return;
+  }
+  root.dataset.prefetchWired = "true";
+
+  root.addEventListener(
+    "pointerenter",
+    (event) => {
+      const link = event.target.closest?.(
+        "a.meta-time, a[href*='#/item/'], a[href*='#/story/']",
+      );
+      if (!link || !root.contains(link)) {
+        return;
+      }
+      const href = link.getAttribute("href") || "";
+      const match = href.match(/#?\/(?:item|story)\/(\d+)/);
+      if (!match) {
+        return;
+      }
+      void prefetchThread(Number(match[1]));
+    },
+    true,
+  );
 }
 
 function createTaskQueue(limit, { signal } = {}) {
@@ -820,6 +916,7 @@ async function renderListPage() {
     `;
     wireThemeToggle();
     wireFeedToggleButtons();
+    wireDiscussionPrefetch(app);
 
     const listEl = app.querySelector(".story-list");
     const listStatus = app.querySelector("[data-list-status]");
@@ -1207,8 +1304,9 @@ function renderStoryDetail(story) {
 
 function applyCommentDepth(element, depth) {
   const safeDepth = Math.max(0, Number(depth) || 0);
+  const visualDepth = Math.min(safeDepth, MAX_COMMENT_DEPTH);
   element.dataset.depth = String(safeDepth);
-  element.style.setProperty("--comment-depth", String(safeDepth));
+  element.style.setProperty("--comment-depth", String(visualDepth));
 }
 
 function normalizeThreadComment(node) {
@@ -1217,19 +1315,12 @@ function normalizeThreadComment(node) {
   }
 
   const id = Number(node.id);
-  if (!Number.isFinite(id)) {
+  if (!Number.isInteger(id) || id <= 0) {
     return null;
   }
 
   const time = Number(node.time ?? node.created_at_i);
-  const rawKids = Array.isArray(node.kids)
-    ? node.kids
-    : Array.isArray(node.children)
-      ? node.children
-      : [];
-  const children = rawKids
-    .map((child) => normalizeThreadComment(child))
-    .filter((child) => child);
+  const replyCount = Number(node.replyCount ?? node.reply_count ?? 0);
 
   return {
     id,
@@ -1239,40 +1330,27 @@ function normalizeThreadComment(node) {
       "unknown",
     time: Number.isFinite(time) ? time : 0,
     text: typeof node.text === "string" ? node.text : "",
-    children,
+    replyCount: Number.isFinite(replyCount) && replyCount > 0 ? replyCount : 0,
     deleted: Boolean(node.deleted),
     dead: Boolean(node.dead),
   };
 }
 
-function normalizeThreadChildren(thread) {
-  if (!thread || typeof thread !== "object") {
-    return [];
-  }
-
-  const rootComments = Array.isArray(thread.comments)
-    ? thread.comments
-    : Array.isArray(thread.children)
-      ? thread.children
-      : [];
-
-  return rootComments
-    .map((child) => normalizeThreadComment(child))
-    .filter((child) => child);
-}
-
-function createCommentRenderState({ signal, sectionEl, rootEl, statusEl }) {
+function createCommentRenderState({ signal, sectionEl, rootEl, statusEl, parentId }) {
   return {
     signal,
     sectionEl,
     rootEl,
     statusEl,
+    parentId: Number(parentId) || 0,
     enqueueRender: createTaskQueue(1, { signal }),
     childLists: new Map(),
-    moreItems: new Map(),
+    replyModels: new Map(),
     nextListId: 1,
-    autoScheduledCount: 0,
     loadedCount: 0,
+    rootNextOffset: 0,
+    rootTotal: 0,
+    rootHasMore: false,
   };
 }
 
@@ -1281,12 +1359,19 @@ function updateCommentStatus(state) {
     return;
   }
 
-  if (state.loadedCount === 0) {
-    state.statusEl.textContent = "Loading comments...";
+  if (state.loadedCount === 0 && !state.rootHasMore) {
+    state.statusEl.textContent = "No comments yet.";
     return;
   }
 
-  state.statusEl.textContent = `Loaded ${state.loadedCount} comments`;
+  if (state.loadedCount === 0) {
+    state.statusEl.textContent = "Loading comments…";
+    return;
+  }
+
+  const totalHint =
+    state.rootTotal > state.loadedCount ? ` · ${state.rootTotal} top-level` : "";
+  state.statusEl.textContent = `${state.loadedCount} shown${totalHint}`;
 }
 
 function removeLoadMoreControl(model) {
@@ -1296,21 +1381,30 @@ function removeLoadMoreControl(model) {
   model.controlEl = null;
 }
 
-function renderLoadMoreControl(model, remaining) {
+function renderLoadMoreControl(
+  model,
+  remaining,
+  { action = "load-more-children", extra = {} } = {},
+) {
   removeLoadMoreControl(model);
 
-  if (remaining <= 0 || !model.container.isConnected) {
+  if (remaining <= 0 || !model.container?.isConnected) {
     return;
   }
 
   const wrap = document.createElement("div");
-  wrap.className = "comment-actions";
+  wrap.className = "comment-load-more";
 
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "btn";
-  button.dataset.action = "load-more-children";
-  button.dataset.listId = model.id;
+  button.className = "btn comment-load-more-btn";
+  button.dataset.action = action;
+  if (model.id) {
+    button.dataset.listId = model.id;
+  }
+  Object.entries(extra).forEach(([key, value]) => {
+    button.dataset[key] = String(value);
+  });
   button.textContent = `Load more (${remaining})`;
 
   wrap.appendChild(button);
@@ -1318,11 +1412,45 @@ function renderLoadMoreControl(model, remaining) {
   model.controlEl = wrap;
 }
 
+function maybeClampCommentText(textEl) {
+  if (!textEl?.isConnected || textEl.dataset.clampChecked === "true") {
+    return;
+  }
+  textEl.dataset.clampChecked = "true";
+
+  if (textEl.scrollHeight <= COMMENT_CLAMP_PX + 8) {
+    return;
+  }
+
+  textEl.classList.add("is-clamped");
+  textEl.style.maxHeight = `${COMMENT_CLAMP_PX}px`;
+
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "comment-show-more";
+  more.dataset.action = "expand-text";
+  more.textContent = "Show more";
+  textEl.insertAdjacentElement("afterend", more);
+}
+
 function createCommentElement(state, item, depth) {
   const article = document.createElement("article");
   article.className = "comment";
   article.dataset.commentId = String(item.id);
+  article.tabIndex = -1;
   applyCommentDepth(article, depth);
+
+  const header = document.createElement("div");
+  header.className = "comment-header";
+
+  const toggleButton = document.createElement("button");
+  toggleButton.type = "button";
+  toggleButton.className = "comment-toggle";
+  toggleButton.dataset.action = "toggle-comment";
+  toggleButton.setAttribute("aria-label", "Collapse comment");
+  toggleButton.title = "Collapse";
+  toggleButton.innerHTML =
+    '<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   const meta = document.createElement("div");
   meta.className = "comment-meta";
@@ -1339,7 +1467,7 @@ function createCommentElement(state, item, depth) {
 
     const timeSpan = document.createElement("span");
     timeSpan.className = "meta-time";
-    timeSpan.textContent = item.time ? timeAgo(item.time) + " ago" : "";
+    timeSpan.textContent = item.time ? `${timeAgo(item.time)} ago` : "";
 
     meta.append(bySpan);
     if (timeSpan.textContent) {
@@ -1347,19 +1475,35 @@ function createCommentElement(state, item, depth) {
     }
   }
 
-  const actions = document.createElement("div");
-  actions.className = "comment-actions";
+  header.append(toggleButton, meta);
 
-  // Chevron expand/collapse toggle button — pill-shaped like feed picker
-  const toggleButton = document.createElement("button");
-  toggleButton.type = "button";
-  toggleButton.className = "btn comment-toggle-btn";
-  toggleButton.dataset.action = "toggle-comment";
-  toggleButton.dataset.slot = "toggle";
-  toggleButton.innerHTML = `<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  toggleButton.setAttribute("aria-label", "Collapse comment");
-  toggleButton.title = "Collapse comment";
-  actions.appendChild(toggleButton);
+  if (item.replyCount > 0) {
+    const repliesButton = document.createElement("button");
+    repliesButton.type = "button";
+    repliesButton.className = "comment-replies-btn";
+    repliesButton.dataset.action = "load-replies";
+    repliesButton.dataset.commentId = String(item.id);
+    repliesButton.textContent =
+      item.replyCount === 1 ? "1 reply" : `${item.replyCount} replies`;
+    repliesButton.setAttribute(
+      "aria-label",
+      `Show ${item.replyCount} ${item.replyCount === 1 ? "reply" : "replies"}`,
+    );
+    header.appendChild(repliesButton);
+
+    state.replyModels.set(item.id, {
+      id: item.id,
+      replyCount: item.replyCount,
+      depth: depth + 1,
+      container: null,
+      loaded: false,
+      loading: false,
+      nextOffset: 0,
+      hasMore: false,
+      total: item.replyCount,
+      buttonEl: repliesButton,
+    });
+  }
 
   const text = document.createElement("div");
   text.className = "comment-text";
@@ -1377,37 +1521,12 @@ function createCommentElement(state, item, depth) {
   const children = document.createElement("div");
   children.className = "comment-children";
 
-  const normalizedKids = Array.isArray(item.children)
-    ? item.children.filter((child) => child && Number.isFinite(child.id))
-    : [];
-
-  if (normalizedKids.length) {
-    const repliesButton = document.createElement("button");
-    repliesButton.type = "button";
-    repliesButton.className = "btn comment-replies-btn";
-    repliesButton.dataset.action = "load-replies";
-    repliesButton.dataset.slot = "replies";
-    repliesButton.dataset.commentId = String(item.id);
-    repliesButton.innerHTML = `<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="replies-count">${normalizedKids.length}</span>`;
-    repliesButton.setAttribute(
-      "aria-label",
-      `Show ${normalizedKids.length} ${normalizedKids.length === 1 ? "reply" : "replies"}`,
-    );
-    repliesButton.title = `Show ${normalizedKids.length} ${
-      normalizedKids.length === 1 ? "reply" : "replies"
-    }`;
-    actions.appendChild(repliesButton);
-
-    state.moreItems.set(item.id, {
-      id: item.id,
-      kids: normalizedKids,
-      depth: depth + 1,
-      container: children,
-      loaded: false,
-    });
+  const replyModel = state.replyModels.get(item.id);
+  if (replyModel) {
+    replyModel.container = children;
   }
 
-  article.append(meta, actions, text, children);
+  article.append(header, text, children);
   return article;
 }
 
@@ -1429,14 +1548,21 @@ function queueCommentBatchRender(state, model, items) {
 
             try {
               const fragment = document.createDocumentFragment();
+              const created = [];
 
               items.forEach((item) => {
-                fragment.appendChild(createCommentElement(state, item, model.depth));
+                const el = createCommentElement(state, item, model.depth);
+                fragment.appendChild(el);
+                created.push(el);
               });
 
               model.container.appendChild(fragment);
               state.loadedCount += items.length;
               updateCommentStatus(state);
+
+              created.forEach((el) => {
+                maybeClampCommentText(el.querySelector(".comment-text"));
+              });
 
               resolve();
             } catch (error) {
@@ -1461,26 +1587,18 @@ function loadChildBatch(state, model, { manual = false } = {}) {
 
   const remaining = model.items.length - model.nextIndex;
   if (remaining <= 0) {
+    if (model.serverHasMore) {
+      renderLoadMoreControl(model, model.serverTotal - model.serverNextOffset, {
+        action: "load-more-server",
+        extra: { parentId: model.serverParentId },
+      });
+    }
     return;
   }
 
-  let count = Math.min(COMMENTS_BATCH_SIZE, remaining);
-  if (model.auto && !manual) {
-    const budgetLeft = COMMENTS_AUTO_RENDER_LIMIT - state.autoScheduledCount;
-    count = Math.min(count, Math.max(0, budgetLeft));
-  }
-
-  if (count <= 0) {
-    renderLoadMoreControl(model, remaining);
-    return;
-  }
-
+  const count = Math.min(COMMENTS_DOM_BATCH, remaining);
   const batch = model.items.slice(model.nextIndex, model.nextIndex + count);
-
   model.nextIndex += count;
-  if (model.auto && !manual) {
-    state.autoScheduledCount += count;
-  }
 
   void queueCommentBatchRender(state, model, batch).then(() => {
     if (state.signal.aborted || !model.container?.isConnected) {
@@ -1488,16 +1606,51 @@ function loadChildBatch(state, model, { manual = false } = {}) {
     }
     const remainingAfter = model.items.length - model.nextIndex;
     if (remainingAfter > 0) {
+      // Auto-stream the first couple of DOM batches, then ask.
+      if (
+        model.auto &&
+        !manual &&
+        model.nextIndex <= COMMENTS_DOM_BATCH * 2
+      ) {
+        loadChildBatch(state, model, { manual: false });
+        return;
+      }
       renderLoadMoreControl(model, remainingAfter);
+      return;
+    }
+    if (model.serverHasMore) {
+      renderLoadMoreControl(
+        model,
+        Math.max(0, model.serverTotal - model.serverNextOffset),
+        {
+          action: "load-more-server",
+          extra: { parentId: model.serverParentId },
+        },
+      );
     }
   });
 }
 
-function mountChildList(state, container, comments, depth, { auto = true } = {}) {
+function mountChildList(
+  state,
+  container,
+  comments,
+  depth,
+  {
+    auto = true,
+    serverParentId = 0,
+    serverNextOffset = 0,
+    serverTotal = 0,
+    serverHasMore = false,
+  } = {},
+) {
   const normalizedComments = Array.isArray(comments)
-    ? comments.filter((comment) => comment && Number.isFinite(comment.id))
+    ? comments.map((comment) => normalizeThreadComment(comment)).filter(Boolean)
     : [];
-  if (!normalizedComments.length || !container?.isConnected) {
+  if (!container?.isConnected) {
+    return;
+  }
+  if (!normalizedComments.length && !serverHasMore) {
     return;
   }
 
@@ -1512,12 +1665,291 @@ function mountChildList(state, container, comments, depth, { auto = true } = {})
     depth,
     auto,
     controlEl: null,
+    serverParentId,
+    serverNextOffset,
+    serverTotal,
+    serverHasMore,
   };
 
   state.childLists.set(listId, model);
   container.dataset.listId = listId;
 
-  loadChildBatch(state, model, { manual: !auto });
+  if (normalizedComments.length) {
+    loadChildBatch(state, model, { manual: !auto });
+  } else if (serverHasMore) {
+    renderLoadMoreControl(model, serverTotal, {
+      action: "load-more-server",
+      extra: { parentId: serverParentId },
+    });
+  }
+}
+
+async function fetchAndMountReplies(state, model) {
+  if (!model || model.loading || state.signal.aborted) {
+    return;
+  }
+
+  model.loading = true;
+  if (model.buttonEl) {
+    model.buttonEl.disabled = true;
+    model.buttonEl.textContent = "Loading…";
+  }
+
+  try {
+    const offset = model.loaded ? model.nextOffset : 0;
+    const data = await fetchThread(model.id, {
+      signal: state.signal,
+      offset,
+      limit: COMMENTS_PAGE_SIZE,
+    });
+
+    if (state.signal.aborted || !model.container?.isConnected) {
+      return;
+    }
+
+    const comments = Array.isArray(data?.comments) ? data.comments : [];
+    const nextOffset = (Number(data?.offset) || 0) + comments.length;
+    const total = Number(data?.total) || model.replyCount;
+    const hasMore = Boolean(data?.hasMore);
+
+    if (!model.loaded) {
+      model.loaded = true;
+      model.container.replaceChildren();
+      mountChildList(state, model.container, comments, model.depth, {
+        auto: true,
+        serverParentId: model.id,
+        serverNextOffset: nextOffset,
+        serverTotal: total,
+        serverHasMore: hasMore,
+      });
+    } else {
+      const listId = model.container.dataset.listId;
+      const listModel = listId ? state.childLists.get(listId) : null;
+      if (listModel) {
+        listModel.items.push(
+          ...comments.map((c) => normalizeThreadComment(c)).filter(Boolean),
+        );
+        listModel.serverNextOffset = nextOffset;
+        listModel.serverHasMore = hasMore;
+        listModel.serverTotal = total;
+        loadChildBatch(state, listModel, { manual: true });
+      } else {
+        mountChildList(state, model.container, comments, model.depth, {
+          auto: false,
+          serverParentId: model.id,
+          serverNextOffset: nextOffset,
+          serverTotal: total,
+          serverHasMore: hasMore,
+        });
+      }
+    }
+
+    model.nextOffset = nextOffset;
+    model.hasMore = hasMore;
+    model.total = total;
+
+    if (model.buttonEl) {
+      model.buttonEl.disabled = false;
+      model.buttonEl.classList.add("is-open");
+      model.buttonEl.textContent =
+        model.replyCount === 1 ? "1 reply" : `${model.replyCount} replies`;
+      model.buttonEl.setAttribute("aria-label", "Replies expanded");
+    }
+  } catch (error) {
+    if (isAbortError(error) || state.signal.aborted) {
+      return;
+    }
+    if (model.buttonEl) {
+      model.buttonEl.disabled = false;
+      model.buttonEl.textContent = "Retry replies";
+    }
+    console.error("Failed to load replies.", error);
+  } finally {
+    model.loading = false;
+  }
+}
+
+async function loadMoreServerPage(state, listModel) {
+  if (!listModel?.serverParentId || state.signal.aborted) {
+    return;
+  }
+
+  removeLoadMoreControl(listModel);
+  const statusBtn = document.createElement("div");
+  statusBtn.className = "comment-load-more";
+  statusBtn.innerHTML = '<span class="status">Loading…</span>';
+  listModel.container.appendChild(statusBtn);
+  listModel.controlEl = statusBtn;
+
+  try {
+    const data = await fetchThread(listModel.serverParentId, {
+      signal: state.signal,
+      offset: listModel.serverNextOffset,
+      limit: COMMENTS_PAGE_SIZE,
+    });
+
+    if (state.signal.aborted || !listModel.container?.isConnected) {
+      return;
+    }
+
+    removeLoadMoreControl(listModel);
+
+    const comments = (Array.isArray(data?.comments) ? data.comments : [])
+      .map((c) => normalizeThreadComment(c))
+      .filter(Boolean);
+    listModel.items.push(...comments);
+    listModel.serverNextOffset =
+      (Number(data?.offset) || listModel.serverNextOffset) + comments.length;
+    listModel.serverHasMore = Boolean(data?.hasMore);
+    listModel.serverTotal = Number(data?.total) || listModel.serverTotal;
+
+    loadChildBatch(state, listModel, { manual: true });
+  } catch (error) {
+    if (isAbortError(error) || state.signal.aborted) {
+      return;
+    }
+    removeLoadMoreControl(listModel);
+    renderLoadMoreControl(
+      listModel,
+      Math.max(0, listModel.serverTotal - listModel.serverNextOffset),
+      {
+        action: "load-more-server",
+        extra: { parentId: listModel.serverParentId },
+      },
+    );
+    console.error("Failed to load more comments.", error);
+  }
+}
+
+function getVisibleCommentElements() {
+  return Array.from(app.querySelectorAll(".comments .comment")).filter((el) => {
+    if (!el.offsetParent && el.offsetHeight === 0) {
+      return false;
+    }
+    // Skip comments inside a collapsed ancestor.
+    return !el.parentElement?.closest?.(".comment.is-collapsed");
+  });
+}
+
+function applyCommentSelection({ scroll = false } = {}) {
+  const comments = Array.from(app.querySelectorAll(".comments .comment"));
+  comments.forEach((el) => el.classList.remove("is-selected"));
+
+  const visible = getVisibleCommentElements();
+  if (!visible.length) {
+    selectedCommentIndex = -1;
+    return;
+  }
+
+  if (selectedCommentIndex < 0) {
+    selectedCommentIndex = 0;
+  }
+  if (selectedCommentIndex >= visible.length) {
+    selectedCommentIndex = visible.length - 1;
+  }
+
+  visible[selectedCommentIndex].classList.add("is-selected");
+
+  if (scroll) {
+    visible[selectedCommentIndex].scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }
+}
+
+function selectCommentIndex(nextIndex, { scroll = true } = {}) {
+  const visible = getVisibleCommentElements();
+  if (!visible.length) {
+    selectedCommentIndex = -1;
+    return;
+  }
+  selectedCommentIndex = Math.max(0, Math.min(nextIndex, visible.length - 1));
+  applyCommentSelection({ scroll });
+}
+
+function activateSelectedCommentReplies() {
+  const visible = getVisibleCommentElements();
+  const selected = visible[selectedCommentIndex];
+  if (!selected) {
+    return;
+  }
+  const replies = selected.querySelector(
+    ':scope > .comment-header [data-action="load-replies"]',
+  );
+  if (replies && !replies.disabled) {
+    replies.click();
+  }
+}
+
+function toggleSelectedComment() {
+  const visible = getVisibleCommentElements();
+  const selected = visible[selectedCommentIndex];
+  if (!selected) {
+    return;
+  }
+  const toggle = selected.querySelector(
+    ':scope > .comment-header [data-action="toggle-comment"]',
+  );
+  if (toggle) {
+    toggle.click();
+  }
+}
+
+function handleStoryKeyboardNavigation(event) {
+  if (event.defaultPrevented || app.dataset.view !== "story") {
+    return;
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return;
+  }
+  if (isEditableTarget(event.target)) {
+    return;
+  }
+
+  if (event.key === "j" || event.key === "ArrowDown") {
+    event.preventDefault();
+    selectCommentIndex(selectedCommentIndex + 1);
+    return;
+  }
+  if (event.key === "k" || event.key === "ArrowUp") {
+    event.preventDefault();
+    selectCommentIndex(selectedCommentIndex - 1);
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    activateSelectedCommentReplies();
+    return;
+  }
+  if (event.key === "h" || event.key === "H") {
+    event.preventDefault();
+    toggleSelectedComment();
+    return;
+  }
+  if (event.key === "g" && !event.shiftKey) {
+    event.preventDefault();
+    selectCommentIndex(0);
+    return;
+  }
+  if (event.key === "G") {
+    event.preventDefault();
+    selectCommentIndex(getVisibleCommentElements().length - 1);
+  }
+}
+
+function teardownStoryKeyboard() {
+  selectedCommentIndex = -1;
+  if (storyKeyboardHandler) {
+    document.removeEventListener("keydown", storyKeyboardHandler);
+    storyKeyboardHandler = null;
+  }
+}
+
+function initializeStoryKeyboard() {
+  teardownStoryKeyboard();
+  storyKeyboardHandler = handleStoryKeyboardNavigation;
+  document.addEventListener("keydown", storyKeyboardHandler);
 }
 
 function wireCommentActions(state) {
@@ -1529,11 +1961,30 @@ function wireCommentActions(state) {
   const clickHandler = (event) => {
     const actionEl = event.target.closest("[data-action]");
     if (!actionEl || !state.sectionEl.contains(actionEl)) {
+      const comment = event.target.closest(".comment");
+      if (comment && state.sectionEl.contains(comment)) {
+        const visible = getVisibleCommentElements();
+        const idx = visible.indexOf(comment);
+        if (idx >= 0) {
+          selectedCommentIndex = idx;
+          applyCommentSelection({ scroll: false });
+        }
+      }
       return;
     }
 
     const action = actionEl.getAttribute("data-action");
     if (!action) {
+      return;
+    }
+
+    if (action === "expand-text") {
+      const textEl = actionEl.previousElementSibling;
+      if (textEl?.classList.contains("comment-text")) {
+        textEl.classList.remove("is-clamped");
+        textEl.style.maxHeight = "";
+      }
+      actionEl.remove();
       return;
     }
 
@@ -1547,38 +1998,39 @@ function wireCommentActions(state) {
       return;
     }
 
-    if (action === "load-more-item") {
-      const commentId = Number(actionEl.getAttribute("data-comment-id"));
-      if (!Number.isFinite(commentId)) {
+    if (action === "load-more-server") {
+      const listId = actionEl.getAttribute("data-list-id") || "";
+      const model = state.childLists.get(listId);
+      if (model) {
+        void loadMoreServerPage(state, model);
         return;
       }
-      const model = state.moreItems.get(commentId);
-      if (!model || model.loaded) {
-        return;
-      }
-
-      model.loaded = true;
-      mountChildList(state, model.container, model.kids, model.depth, { auto: false });
-
-      const actionWrap = actionEl.closest(".comment-actions");
-      if (actionWrap) {
-        actionWrap.remove();
+      const parentId = Number(
+        actionEl.getAttribute("data-parent-id") ||
+          actionEl.dataset.parentId ||
+          0,
+      );
+      if (Number.isInteger(parentId) && parentId > 0) {
+        void loadMoreRootComments(state, parentId);
       }
       return;
     }
 
     if (action === "load-replies") {
       const commentId = Number(actionEl.getAttribute("data-comment-id"));
-      if (!Number.isFinite(commentId)) return;
-      const model = state.moreItems.get(commentId);
-      if (!model || model.loaded) return;
-
-      model.loaded = true;
-      mountChildList(state, model.container, model.kids, model.depth, { auto: false });
-      // Rotate chevron to show "open" state instead of removing the button
-      actionEl.classList.add("is-open");
-      actionEl.setAttribute("aria-label", "Replies loaded");
-      actionEl.disabled = true;
+      if (!Number.isFinite(commentId)) {
+        return;
+      }
+      const model = state.replyModels.get(commentId);
+      if (!model) {
+        return;
+      }
+      if (model.loaded && !model.hasMore) {
+        const comment = actionEl.closest(".comment");
+        comment?.classList.toggle("is-collapsed");
+        return;
+      }
+      void fetchAndMountReplies(state, model);
       return;
     }
 
@@ -1590,8 +2042,7 @@ function wireCommentActions(state) {
       const isCollapsed = comment.classList.toggle("is-collapsed");
       const nextLabel = isCollapsed ? "Expand comment" : "Collapse comment";
       actionEl.setAttribute("aria-label", nextLabel);
-      actionEl.title = nextLabel;
-      // Chevron rotation is handled by CSS via .is-collapsed on the parent .comment
+      actionEl.title = isCollapsed ? "Expand" : "Collapse";
     }
   };
 
@@ -1599,9 +2050,118 @@ function wireCommentActions(state) {
   commentActionHandlers.set(state.sectionEl, clickHandler);
 }
 
+async function loadMoreRootComments(state, parentId) {
+  if (state.signal.aborted || !state.rootHasMore) {
+    return;
+  }
+
+  const footer = state.sectionEl.querySelector("[data-root-more]");
+  if (footer) {
+    footer.innerHTML = '<span class="status">Loading…</span>';
+  }
+
+  try {
+    const data = await fetchThread(parentId, {
+      signal: state.signal,
+      offset: state.rootNextOffset,
+      limit: COMMENTS_PAGE_SIZE,
+    });
+
+    if (state.signal.aborted) {
+      return;
+    }
+
+    const comments = Array.isArray(data?.comments) ? data.comments : [];
+    state.rootNextOffset =
+      (Number(data?.offset) || state.rootNextOffset) + comments.length;
+    state.rootHasMore = Boolean(data?.hasMore);
+    state.rootTotal = Number(data?.total) || state.rootTotal;
+
+    const listId = state.rootEl.dataset.listId;
+    const listModel = listId ? state.childLists.get(listId) : null;
+    if (listModel) {
+      listModel.items.push(
+        ...comments.map((c) => normalizeThreadComment(c)).filter(Boolean),
+      );
+      listModel.serverNextOffset = state.rootNextOffset;
+      listModel.serverHasMore = state.rootHasMore;
+      listModel.serverTotal = state.rootTotal;
+      loadChildBatch(state, listModel, { manual: true });
+    } else {
+      mountChildList(state, state.rootEl, comments, 0, {
+        auto: false,
+        serverParentId: parentId,
+        serverNextOffset: state.rootNextOffset,
+        serverTotal: state.rootTotal,
+        serverHasMore: state.rootHasMore,
+      });
+    }
+
+    renderRootMoreFooter(state, parentId);
+    updateCommentStatus(state);
+  } catch (error) {
+    if (isAbortError(error) || state.signal.aborted) {
+      return;
+    }
+    if (footer) {
+      footer.innerHTML = "";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn comment-load-more-btn";
+      btn.dataset.action = "load-more-server";
+      btn.dataset.parentId = String(parentId);
+      btn.textContent = "Retry loading comments";
+      footer.appendChild(btn);
+    }
+  }
+}
+
+function renderRootMoreFooter(state, parentId) {
+  let footer = state.sectionEl.querySelector("[data-root-more]");
+  if (!footer) {
+    footer = document.createElement("div");
+    footer.className = "comment-load-more";
+    footer.dataset.rootMore = "true";
+    state.sectionEl.appendChild(footer);
+  }
+
+  footer.replaceChildren();
+  if (!state.rootHasMore) {
+    footer.hidden = true;
+    return;
+  }
+
+  footer.hidden = false;
+  const remaining = Math.max(0, state.rootTotal - state.rootNextOffset);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn comment-load-more-btn";
+  btn.dataset.action = "load-more-server";
+  btn.dataset.parentId = String(parentId);
+  btn.textContent = remaining
+    ? `Load more comments (${remaining})`
+    : "Load more comments";
+  footer.appendChild(btn);
+}
+
+function paintStoryDetail(detailSlot, story) {
+  if (!detailSlot?.isConnected) {
+    return null;
+  }
+  const html = renderStoryDetail(story);
+  const rendered = createElementFromHTML(html);
+  if (!rendered) {
+    return detailSlot;
+  }
+  detailSlot.replaceWith(rendered);
+  return rendered;
+}
+
 async function renderStoryPage(id) {
   const storyId = Number(id);
   app.dataset.view = "story";
+  teardownStoryKeyboard();
+
   if (!Number.isFinite(storyId) || storyId <= 0) {
     app.innerHTML = `
       <section class="list-pane">
@@ -1620,33 +2180,61 @@ async function renderStoryPage(id) {
   app.innerHTML = `
     <section class="list-pane">
       ${topbar('<a class="btn" href="#/">back</a>')}
-      <article class="story story-detail">
-        <div class="story-title">loading story...</div>
-        <div class="story-meta"><span class="status">fetching story details...</span></div>
+      <article class="story story-detail" data-story-shell>
+        <div class="story-title story-title-skeleton">Loading story…</div>
+        <div class="story-meta"><span class="status">Fetching details…</span></div>
       </article>
       <section class="comments" aria-live="polite">
         <h2 class="comments-title">Comments</h2>
-        <p class="status" data-comments-status>Loading comments...</p>
+        <p class="status" data-comments-status>Loading comments…</p>
+        <div class="comment-skeleton" data-comment-skeleton aria-hidden="true">
+          <div class="comment-skeleton-line"></div>
+          <div class="comment-skeleton-line short"></div>
+          <div class="comment-skeleton-line"></div>
+        </div>
         <div class="comment-children" data-comments-root></div>
       </section>
     </section>
   `;
   wireThemeToggle();
   wireFeedToggleButtons();
+  wireDiscussionPrefetch(app);
 
-  const detailSlot = app.querySelector(".story-detail");
+  let detailSlot = app.querySelector("[data-story-shell]");
   const commentsSection = app.querySelector(".comments");
   const commentsRoot = app.querySelector("[data-comments-root]");
   const commentsStatus = app.querySelector("[data-comments-status]");
+  const skeleton = app.querySelector("[data-comment-skeleton]");
 
   if (!detailSlot || !commentsSection || !commentsRoot || !commentsStatus) {
     return;
   }
 
-  // Thread endpoint includes story metadata + nested comments (Algolia shape).
+  const itemPromise = getItem(storyId, { signal: controller.signal }).catch(
+    () => null,
+  );
+  const threadPromise = fetchThread(storyId, {
+    signal: controller.signal,
+    offset: 0,
+    limit: COMMENTS_PAGE_SIZE,
+  });
+
+  void itemPromise.then((item) => {
+    if (
+      controller.signal.aborted ||
+      currentViewController !== controller ||
+      !detailSlot?.isConnected
+    ) {
+      return;
+    }
+    if (item && normalizeStoryDetail(item)) {
+      detailSlot = paintStoryDetail(detailSlot, item) || detailSlot;
+    }
+  });
+
   let thread = null;
   try {
-    thread = await fetchThread(storyId, { signal: controller.signal });
+    thread = await threadPromise;
   } catch (error) {
     if (
       isAbortError(error) ||
@@ -1656,10 +2244,13 @@ async function renderStoryPage(id) {
       return;
     }
 
-    detailSlot.innerHTML = `
-      <div class="story-title">failed to load story</div>
-      <div class="story-meta"><span>${escapeHTML(error.message)}</span></div>
-    `;
+    if (detailSlot?.isConnected && detailSlot.hasAttribute("data-story-shell")) {
+      detailSlot.innerHTML = `
+        <div class="story-title">failed to load story</div>
+        <div class="story-meta"><span>${escapeHTML(error.message)}</span></div>
+      `;
+    }
+    skeleton?.remove();
     commentsStatus.textContent = "Could not load comments.";
     return;
   }
@@ -1668,36 +2259,66 @@ async function renderStoryPage(id) {
     return;
   }
 
-  if (!thread || !normalizeStoryDetail(thread)) {
-    detailSlot.innerHTML = `
-      <div class="story-title">story not found</div>
-    `;
-    commentsStatus.textContent = "No comments available.";
-    return;
+  if (thread && normalizeStoryDetail(thread)) {
+    if (detailSlot?.isConnected) {
+      detailSlot = paintStoryDetail(detailSlot, thread) || detailSlot;
+    }
+  } else if (detailSlot?.hasAttribute?.("data-story-shell")) {
+    const item = await itemPromise;
+    if (controller.signal.aborted || currentViewController !== controller) {
+      return;
+    }
+    if (item && normalizeStoryDetail(item)) {
+      detailSlot = paintStoryDetail(detailSlot, item) || detailSlot;
+    } else if (detailSlot?.isConnected) {
+      detailSlot.innerHTML = `<div class="story-title">story not found</div>`;
+      skeleton?.remove();
+      commentsStatus.textContent = "No comments available.";
+      return;
+    }
   }
 
-  const renderedStory = createElementFromHTML(renderStoryDetail(thread));
-  if (renderedStory) {
-    detailSlot.replaceWith(renderedStory);
-  }
+  skeleton?.remove();
 
   const commentState = createCommentRenderState({
     signal: controller.signal,
     sectionEl: commentsSection,
     rootEl: commentsRoot,
     statusEl: commentsStatus,
+    parentId: storyId,
   });
 
-  wireCommentActions(commentState);
+  const rootComments = Array.isArray(thread?.comments) ? thread.comments : [];
+  commentState.rootNextOffset =
+    (Number(thread?.offset) || 0) + rootComments.length;
+  commentState.rootTotal = Number(thread?.total) || rootComments.length;
+  commentState.rootHasMore = Boolean(thread?.hasMore);
 
-  const threadComments = normalizeThreadChildren(thread);
-  if (!threadComments.length) {
+  wireCommentActions(commentState);
+  initializeStoryKeyboard();
+
+  if (!rootComments.length && !commentState.rootHasMore) {
     commentsStatus.textContent = "No comments yet.";
     return;
   }
 
-  mountChildList(commentState, commentState.rootEl, threadComments, 0, { auto: true });
+  mountChildList(commentState, commentState.rootEl, rootComments, 0, {
+    auto: true,
+    serverParentId: storyId,
+    serverNextOffset: commentState.rootNextOffset,
+    serverTotal: commentState.rootTotal,
+    serverHasMore: commentState.rootHasMore,
+  });
+  renderRootMoreFooter(commentState, storyId);
+  updateCommentStatus(commentState);
+
+  window.requestAnimationFrame(() => {
+    if (!controller.signal.aborted) {
+      selectCommentIndex(0, { scroll: false });
+    }
+  });
 }
+
 
 // Drop any previously installed service worker / caches so posts always load fresh.
 if ("serviceWorker" in navigator) {
