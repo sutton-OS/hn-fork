@@ -171,7 +171,7 @@ function applyTheme(theme) {
   document.documentElement.style.colorScheme = nextTheme;
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", nextTheme === "dark" ? "#111111" : "#f3efe8");
+    ?.setAttribute("content", nextTheme === "dark" ? "#000000" : "#ffffff");
   try {
     sessionStorage.setItem(THEME_STORAGE_KEY, nextTheme);
   } catch {

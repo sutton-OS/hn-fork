@@ -8,7 +8,7 @@
     document.documentElement.style.colorScheme = theme;
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
-      meta.setAttribute("content", theme === "dark" ? "#111111" : "#f3efe8");
+      meta.setAttribute("content", theme === "dark" ? "#000000" : "#ffffff");
     }
   } catch (e) {
     document.documentElement.dataset.theme = "dark";

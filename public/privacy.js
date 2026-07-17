@@ -23,7 +23,7 @@
     document.documentElement.style.colorScheme = next;
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
-      meta.setAttribute("content", next === "dark" ? "#111111" : "#f3efe8");
+      meta.setAttribute("content", next === "dark" ? "#000000" : "#ffffff");
     }
     try {
       sessionStorage.setItem(KEY, next);
