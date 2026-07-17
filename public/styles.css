@@ -212,6 +212,8 @@ html[data-theme="dark"] .app {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  /* Lock row height so Back vs Best/Top/New does not shift the bottom rule. */
+  min-height: 22px;
   margin-bottom: 18px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
@@ -224,6 +226,7 @@ html[data-theme="dark"] .app {
   gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
+  min-height: 22px;
 }
 
 .topbar-actions {
@@ -233,6 +236,32 @@ html[data-theme="dark"] .app {
   gap: 8px;
   flex: 0 0 auto;
   margin-left: auto;
+}
+
+/* Match feed-option metrics so swapping feeds ↔ back does not reflow the bar. */
+.topbar-start .btn {
+  min-height: 0;
+  height: auto;
+  padding: 0.35rem 0 0.3rem;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.topbar-start .btn:hover,
+.topbar-start .btn:focus-visible {
+  background: transparent;
+  border-bottom-color: currentColor;
+  outline: none;
+}
+
+.topbar-start .btn:active {
+  transform: none;
 }
 
 .theme-toggle {
