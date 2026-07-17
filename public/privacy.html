@@ -137,7 +137,10 @@
 
         <h2>Security measures</h2>
         <ul>
-          <li>Content-Security-Policy locked to first-party assets and APIs</li>
+          <li>
+            Content-Security-Policy with <code>default-src 'none'</code> and
+            explicit first-party allowlists for scripts, styles, fonts, images, and API calls
+          </li>
           <li>Strict-Transport-Security, frame denial, nosniff, Permissions-Policy</li>
           <li>
             Full app: HN HTML sanitized with vendored DOMPurify before render.
