@@ -55,6 +55,58 @@
           metadata such as IP address, user agent, URL path, and timestamps for delivery
           and abuse prevention. HNx does not add product analytics on top of that.
         </p>
+        <p>
+          That metadata is inherent to how the web works: the server that answers your
+          request can always see the network path used to reach it. If you want to
+          reduce how much of <em>you</em> is visible there, these steps help:
+        </p>
+        <ul>
+          <li>
+            <strong>Use a trustworthy VPN.</strong> A good VPN replaces your home or
+            mobile IP with the provider’s. The host then sees the VPN exit, not your
+            ISP address. Prefer providers with a clear no-logs policy, audited claims,
+            and jurisdiction you are comfortable with. Remember: you are shifting trust
+            from your ISP (and this host’s view of your IP) to the VPN operator.
+          </li>
+          <li>
+            <strong>Tor Browser for stronger anonymity.</strong> Tor routes traffic
+            through volunteer relays so the site typically sees a Tor exit node rather
+            than your IP. It is slower and some sites block exits, but it is the
+            strongest common option when you do not want your address tied to visits.
+            Download only from the official Tor Project site.
+          </li>
+          <li>
+            <strong>Prefer a privacy-respecting browser and defaults.</strong> Firefox
+            (with strict tracking protection), Brave, or similar tools reduce
+            fingerprinting and cross-site tracking. Keep the browser updated. Avoid
+            logging into personal accounts in the same profile you use for sensitive
+            browsing if you care about unlinkability.
+          </li>
+          <li>
+            <strong>Use private DNS when you can.</strong> DNS-over-HTTPS or
+            DNS-over-TLS (or your VPN’s DNS) stops casual observers on your local
+            network from seeing every hostname you resolve. It does not hide visits
+            from this site’s host once you connect.
+          </li>
+          <li>
+            <strong>Be careful with extensions and “free” proxies.</strong> Browser
+            extensions can read the pages you visit. Only install ones you trust.
+            Random free proxy sites often log more than they hide.
+          </li>
+          <li>
+            <strong>Separate contexts when it matters.</strong> A dedicated browser
+            profile, container tabs, or a separate device for high-sensitivity reading
+            limits how this visit links to your everyday identity.
+          </li>
+        </ul>
+        <p>
+          None of these make you invisible, and HNx cannot force them on your behalf.
+          They are tools you control. For deeper guidance, the
+          <a href="https://www.eff.org/pages/tools" rel="noopener noreferrer" target="_blank">EFF’s privacy tools overview</a>
+          and
+          <a href="https://ssd.eff.org/" rel="noopener noreferrer" target="_blank">Surveillance Self-Defense</a>
+          guides are solid starting points.
+        </p>
 
         <h2>What leaves when you open a story</h2>
         <p>
