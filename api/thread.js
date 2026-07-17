@@ -1,11 +1,7 @@
-const THREAD_TIMEOUT_MS = 8000;
-const THREAD_CACHE_CONTROL = "s-maxage=60, stale-while-revalidate=600";
+const { sendJSON, getQueryString } = require("../lib/hn");
 
-function sendJSON(res, status, payload) {
-  res.status(status);
-  res.setHeader("content-type", "application/json; charset=utf-8");
-  res.send(JSON.stringify(payload));
-}
+const THREAD_TIMEOUT_MS = 8000;
+const ALGOLIA_ITEM_URL = "https://hn.algolia.com/api/v1/items";
 
 module.exports = async function handler(req, res) {
   if (req.method !== "GET") {
@@ -14,7 +10,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const rawId = Array.isArray(req.query?.id) ? req.query.id[0] : req.query?.id;
+  const rawId = getQueryString(req.query?.id);
   const storyId = Number(rawId);
   if (!rawId || !Number.isInteger(storyId) || storyId <= 0) {
     sendJSON(res, 400, { error: "Invalid id parameter." });
@@ -27,17 +23,19 @@ module.exports = async function handler(req, res) {
   }, THREAD_TIMEOUT_MS);
 
   try {
-    const upstream = await fetch(`https://hn.algolia.com/api/v1/items/${storyId}`, {
+    const upstream = await fetch(`${ALGOLIA_ITEM_URL}/${storyId}`, {
       method: "GET",
       signal: controller.signal,
       headers: {
         accept: "application/json",
-        "user-agent": "hn-fork-thread/1.0",
+        "user-agent": "hnx-thread/1.0",
       },
     });
 
     if (!upstream.ok) {
-      sendJSON(res, upstream.status, { error: `Upstream request failed (${upstream.status}).` });
+      sendJSON(res, upstream.status, {
+        error: `Upstream request failed (${upstream.status}).`,
+      });
       return;
     }
 
@@ -56,7 +54,7 @@ module.exports = async function handler(req, res) {
 
     res.status(200);
     res.setHeader("content-type", "application/json; charset=utf-8");
-    res.setHeader("cache-control", THREAD_CACHE_CONTROL);
+    res.setHeader("cache-control", "no-store");
     res.send(JSON.stringify(payload));
   } catch (error) {
     if (error?.name === "AbortError") {

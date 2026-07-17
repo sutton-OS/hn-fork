@@ -1,23 +1,33 @@
+import DOMPurify from "./vendor/dompurify.es.mjs";
+
 const STORIES_ENDPOINT = "/api/stories";
 const ITEM_ENDPOINT = "/api/item";
-const HN_FALLBACK_BASE = "https://hacker-news.firebaseio.com/v0";
 const PAGE_SIZE = 30;
-const FALLBACK_FETCH_CONCURRENCY = 8;
-const FEED_STORAGE_KEY = "hn-fork:feed:v1";
+const INITIAL_PAGE_SIZE = 12;
 const COMMENTS_BATCH_SIZE = 30;
 const COMMENTS_AUTO_RENDER_LIMIT = 200;
-const PREVIEW_HASH_PREFIX = "p=";
-const PREVIEW_BLOCK_TIMEOUT_MS = 2500;
-const PREVIEW_EMBED_BLOCKED_MESSAGE =
-  "This site may block embedding. Use Open in new tab.";
-const READER_ENDPOINT = "/api/reader";
 const THREAD_ENDPOINT = "/api/thread";
-const READABILITY_MODULE_URL = "https://esm.sh/@mozilla/readability@0.5.0?bundle";
 const FEED_BEST = "best";
 const FEED_TOP = "top";
 const FEED_NEW = "new";
 const FEEDS = [FEED_BEST, FEED_TOP, FEED_NEW];
-const PRELOAD_SCRIPT_ID = "hn-preload";
+const LIST_VISIBLE_REFRESH_AFTER_MS = 60 * 1000;
+const SANITIZE_ALLOWED_TAGS = [
+  "a",
+  "b",
+  "blockquote",
+  "br",
+  "code",
+  "em",
+  "i",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "span",
+  "strong",
+  "ul",
+];
 const app = document.getElementById("app");
 app?.classList.add("shell");
 
@@ -26,38 +36,49 @@ let currentViewController = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
 let currentFeed = FEED_BEST;
-const previewState = {
-  activeUrl: "",
-  loadToken: 0,
-  blockedTimer: null,
-  readerController: null,
-  commentsController: null,
-  mode: "embed",
-};
-let readabilityModulePromise = null;
+let listHiddenAt = 0;
 const commentActionHandlers = new WeakMap();
-const preloadedStoriesState = readPreloadedStories();
 
-applyFeed(loadSavedFeed());
+// Always start dark; theme/feed are session-only (not persisted).
+applyTheme("dark");
 window.addEventListener("hashchange", handleRouteChange);
-window.addEventListener("load", handleRouteChange);
-// Prefetch Readability on idle so Reader View opens instantly when needed
-if ("requestIdleCallback" in window) {
-  window.requestIdleCallback(() => {
-    void getReadabilityCtor().catch(() => {});
-  });
-} else {
-  window.setTimeout(() => {
-    void getReadabilityCtor().catch(() => {});
-  }, 3000);
+window.addEventListener("pageshow", handlePageShow);
+document.addEventListener("visibilitychange", handleVisibilityChange);
+// Don't wait for window "load" (fonts/images) — modules already run after DOM parse.
+void handleRouteChange();
+
+function handlePageShow(event) {
+  if (event.persisted) {
+    refreshCurrentList();
+  }
 }
-document.addEventListener("keydown", handleGlobalKeydown);
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    listHiddenAt = Date.now();
+    return;
+  }
+
+  if (
+    listHiddenAt > 0 &&
+    Date.now() - listHiddenAt >= LIST_VISIBLE_REFRESH_AFTER_MS
+  ) {
+    refreshCurrentList();
+  }
+  listHiddenAt = 0;
+}
+
+function refreshCurrentList() {
+  if (app.dataset.view !== "list") {
+    return;
+  }
+  void renderRoute({ type: "list" });
+}
 
 async function handleRouteChange() {
   const route = parseRoute();
 
   if (canHandleRouteInPlace(route)) {
-    applyListRoute(route);
     return;
   }
 
@@ -76,17 +97,10 @@ async function renderRoute(route = parseRoute()) {
   }
 
   await renderListPage();
-  applyListRoute(route);
 }
 
 function canHandleRouteInPlace(route) {
   return app.dataset.view === "list" && route.type === "list";
-}
-
-function applyListRoute(route) {
-  if (route.type !== "list") {
-    return;
-  }
 }
 
 function parseRoute() {
@@ -114,54 +128,6 @@ function parseRoute() {
   return { type: "list" };
 }
 
-function readPreloadedStories() {
-  const preloadEl = document.getElementById(PRELOAD_SCRIPT_ID);
-  if (!preloadEl) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(preloadEl.textContent || "{}");
-    const feed = normalizeFeed(payload?.feed);
-    const offset = Math.max(0, Number(payload?.offset) || 0);
-    const limit = Math.max(1, Number(payload?.limit) || PAGE_SIZE);
-    const stories = Array.isArray(payload?.stories) ? payload.stories : [];
-
-    return {
-      consumed: false,
-      feed,
-      offset,
-      limit,
-      stories,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function takePreloadedStories(feed, { offset = 0, limit = PAGE_SIZE } = {}) {
-  if (!preloadedStoriesState || preloadedStoriesState.consumed) {
-    return null;
-  }
-
-  const normalizedFeed = normalizeFeed(feed);
-  const safeOffset = Math.max(0, Number(offset) || 0);
-  const safeLimit = Math.max(1, Number(limit) || PAGE_SIZE);
-
-  if (
-    preloadedStoriesState.feed !== normalizedFeed ||
-    preloadedStoriesState.offset !== safeOffset
-  ) {
-    return null;
-  }
-  if (preloadedStoriesState.limit !== safeLimit) {
-    return null;
-  }
-
-  preloadedStoriesState.consumed = true;
-  return preloadedStoriesState.stories;
-}
-
 function escapeHTML(value) {
   unescape.textContent = value ?? "";
   return unescape.innerHTML;
@@ -171,19 +137,37 @@ function normalizeFeed(feed) {
   return FEEDS.includes(feed) ? feed : FEED_BEST;
 }
 
-function loadSavedFeed() {
-  try {
-    const saved = localStorage.getItem(FEED_STORAGE_KEY);
-    return normalizeFeed(saved);
-  } catch {
-    return FEED_BEST;
-  }
+function updateThemeToggle() {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.setAttribute("aria-checked", isDark ? "true" : "false");
+    button.setAttribute("aria-label", isDark ? "Use light mode" : "Use dark mode");
+  });
 }
 
-function saveFeed(feed) {
-  try {
-    localStorage.setItem(FEED_STORAGE_KEY, normalizeFeed(feed));
-  } catch {}
+function applyTheme(theme) {
+  const nextTheme = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = nextTheme;
+  document.documentElement.style.colorScheme = nextTheme;
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", nextTheme === "dark" ? "#111111" : "#f3efe8");
+  updateThemeToggle();
+}
+
+function wireThemeToggle(root = app) {
+  root.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    if (button.dataset.themeWired) {
+      return;
+    }
+    button.dataset.themeWired = "true";
+    button.addEventListener("click", () => {
+      const nextTheme =
+        document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      applyTheme(nextTheme);
+    });
+  });
+  updateThemeToggle();
 }
 
 function getFeedLabel(feed = currentFeed) {
@@ -225,15 +209,10 @@ function updateFeedToggleLabels() {
   });
 }
 
-function applyFeed(feed, { persist = false, rerender = false } = {}) {
-  const normalized = normalizeFeed(feed);
-  const didChange = normalized !== currentFeed;
-  currentFeed = normalized;
-  if (persist) {
-    saveFeed(currentFeed);
-  }
+function applyFeed(feed, { rerender = false } = {}) {
+  currentFeed = normalizeFeed(feed);
   updateFeedToggleLabels();
-  if (rerender && didChange) {
+  if (rerender) {
     rerenderListForFeedChange();
   }
 }
@@ -257,7 +236,7 @@ function wireFeedToggleButtons(root = app) {
     button.dataset.feedWired = "true";
     button.addEventListener("click", () => {
       const next = button.getAttribute("data-feed-option");
-      applyFeed(next, { persist: true, rerender: true });
+      applyFeed(next, { rerender: true });
     });
   });
   updateFeedToggleLabels();
@@ -276,13 +255,6 @@ function abortCurrentViewLoad() {
     currentViewController.abort();
     currentViewController = null;
   }
-  clearPreviewBlockedTimer();
-  clearPreviewReaderController();
-  clearPreviewCommentsController();
-  previewState.loadToken += 1;
-  previewState.activeUrl = "";
-  previewState.mode = "embed";
-  app.classList.remove("is-preview-open");
 }
 
 function navigateTo(pathname) {
@@ -299,120 +271,6 @@ function navigateTo(pathname) {
   window.location.hash = normalizedPath;
 }
 
-function previewHashForUrl(url) {
-  return `#${PREVIEW_HASH_PREFIX}${encodeURIComponent(url)}`;
-}
-
-function clearPreviewBlockedTimer() {
-  if (previewState.blockedTimer) {
-    window.clearTimeout(previewState.blockedTimer);
-    previewState.blockedTimer = null;
-  }
-}
-
-function clearPreviewReaderController() {
-  if (previewState.readerController) {
-    previewState.readerController.abort();
-    previewState.readerController = null;
-  }
-}
-
-function clearPreviewCommentsController() {
-  if (previewState.commentsController) {
-    previewState.commentsController.abort();
-    previewState.commentsController = null;
-  }
-}
-
-function getPreviewElements() {
-  const pane = app.querySelector("[data-preview-pane]");
-  if (!pane) {
-    return null;
-  }
-
-  const titleEl = pane.querySelector("[data-preview-title]");
-  const domainEl = pane.querySelector("[data-preview-domain]");
-  const closeButton = pane.querySelector("[data-preview-close]");
-  const readerButton = pane.querySelector("[data-preview-reader]");
-  const openLink = pane.querySelector("[data-preview-open]");
-  const iframe = pane.querySelector("[data-preview-frame]");
-  const loading = pane.querySelector("[data-preview-loading]");
-  const reader = pane.querySelector("[data-preview-reader-content]");
-  const commentsPanel = pane.querySelector("[data-preview-comments]");
-  const commentsSection = pane.querySelector("[data-preview-comments-section]");
-  const commentsStory = pane.querySelector("[data-preview-comments-story]");
-  const commentsRoot = pane.querySelector("[data-preview-comments-root]");
-  const commentsStatus = pane.querySelector("[data-preview-comments-status]");
-  const fallback = pane.querySelector("[data-preview-fallback]");
-
-  if (
-    !titleEl ||
-    !domainEl ||
-    !closeButton ||
-    !readerButton ||
-    !openLink ||
-    !iframe ||
-    !loading ||
-    !reader ||
-    !commentsPanel ||
-    !commentsSection ||
-    !commentsStory ||
-    !commentsRoot ||
-    !commentsStatus ||
-    !fallback
-  ) {
-    return null;
-  }
-
-  return {
-    pane,
-    titleEl,
-    domainEl,
-    closeButton,
-    readerButton,
-    openLink,
-    iframe,
-    loading,
-    reader,
-    commentsPanel,
-    commentsSection,
-    commentsStory,
-    commentsRoot,
-    commentsStatus,
-    fallback,
-  };
-}
-
-function getPreviewDataFromLink(link) {
-  if (!link) {
-    return null;
-  }
-
-  const url = getSafeUrl(link.dataset.previewUrl || link.getAttribute("href"));
-  if (!url) {
-    return null;
-  }
-
-  const title = (link.dataset.previewTitle || link.textContent || "").trim();
-  const domain = (link.dataset.previewDomain || getDomain(url) || "").trim();
-  return { url, title, domain, row: link.closest(".story") };
-}
-
-function findStoryLinkByPreviewUrl(url) {
-  const safeUrl = getSafeUrl(url);
-  if (!safeUrl) {
-    return null;
-  }
-
-  const links = app.querySelectorAll(".story-list .story-title a[data-preview-url]");
-  for (const link of links) {
-    if (getSafeUrl(link.dataset.previewUrl) === safeUrl) {
-      return link;
-    }
-  }
-  return null;
-}
-
 function setSelectedStoryElement(storyEl, { scroll = false } = {}) {
   if (!storyEl) {
     return;
@@ -424,531 +282,6 @@ function setSelectedStoryElement(storyEl, { scroll = false } = {}) {
   }
   selectedStoryIndex = nextIndex;
   applyListSelection({ scroll });
-}
-
-function setPreviewFallbackMessage(elements, message = "", { kind = "info" } = {}) {
-  const trimmed = (message || "").trim();
-  elements.fallback.textContent = trimmed;
-  elements.fallback.dataset.kind = trimmed ? kind : "";
-  elements.fallback.hidden = !trimmed;
-}
-
-function setPreviewLoadingVisible(elements, visible, message = "Loading preview...") {
-  elements.loading.hidden = !visible;
-  elements.loading.textContent = message;
-}
-
-function setPreviewMode(elements, mode) {
-  const normalizedMode =
-    mode === "reader" || mode === "comments" ? mode : "embed";
-  previewState.mode = normalizedMode;
-  elements.reader.hidden = normalizedMode !== "reader";
-  elements.commentsPanel.hidden = normalizedMode !== "comments";
-  elements.iframe.hidden = normalizedMode !== "embed";
-  const hideActionsForComments = normalizedMode === "comments";
-  elements.readerButton.hidden = hideActionsForComments;
-  elements.openLink.hidden = hideActionsForComments;
-  elements.readerButton.setAttribute(
-    "aria-pressed",
-    normalizedMode === "reader" ? "true" : "false",
-  );
-  elements.readerButton.textContent = normalizedMode === "reader" ? "Web View" : "Reader View";
-}
-
-function setPreviewReaderButtonLoading(elements, loading) {
-  if (previewState.mode === "comments") {
-    elements.readerButton.disabled = true;
-    elements.readerButton.textContent = "Reader View";
-    return;
-  }
-  elements.readerButton.disabled = loading;
-  if (loading) {
-    elements.readerButton.textContent = "Loading Reader...";
-  } else {
-    elements.readerButton.textContent = previewState.mode === "reader" ? "Web View" : "Reader View";
-  }
-}
-
-function clearPreviewReaderContent(elements) {
-  elements.reader.replaceChildren();
-}
-
-function clearPreviewCommentsContent(elements, statusMessage = "Loading comments...") {
-  elements.commentsRoot.replaceChildren();
-  elements.commentsStatus.textContent = statusMessage;
-  elements.commentsStory.innerHTML = `
-    <div class="story-title">loading story...</div>
-    <div class="story-meta"><span class="status">fetching story details...</span></div>
-  `;
-}
-
-function isFrameUsable(iframe) {
-  try {
-    const href = iframe.contentWindow?.location?.href || "";
-    return Boolean(href && href !== "about:blank" && href !== "about:srcdoc");
-  } catch {
-    return true;
-  }
-}
-
-function getSafeResolvedUrl(value, baseUrl = "") {
-  if (!value) {
-    return null;
-  }
-  try {
-    const parsed = baseUrl ? new URL(value, baseUrl) : new URL(value);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed.href;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function getReadabilityCtor() {
-  if (!readabilityModulePromise) {
-    readabilityModulePromise = import(READABILITY_MODULE_URL).catch((error) => {
-      readabilityModulePromise = null;
-      throw error;
-    });
-  }
-
-  const module = await readabilityModulePromise;
-  const candidate = module?.Readability ?? module?.default?.Readability ?? module?.default;
-  if (typeof candidate !== "function") {
-    throw new Error("Readability is unavailable.");
-  }
-  return candidate;
-}
-
-function setReaderViewError(elements, message) {
-  clearPreviewReaderContent(elements);
-  const errorEl = document.createElement("p");
-  errorEl.className = "preview-reader-error";
-  errorEl.textContent = message;
-  elements.reader.appendChild(errorEl);
-}
-
-async function openReaderView() {
-  const elements = getPreviewElements();
-  if (!elements) {
-    return;
-  }
-
-  const safeUrl = getSafeUrl(previewState.activeUrl);
-  if (!safeUrl) {
-    return;
-  }
-
-  const protocol = new URL(safeUrl).protocol;
-  if (protocol !== "https:") {
-    setPreviewMode(elements, "embed");
-    setPreviewReaderButtonLoading(elements, false);
-    setPreviewLoadingVisible(elements, false);
-    setPreviewFallbackMessage(
-      elements,
-      "Reader View only supports https links. Use Open in new tab.",
-      { kind: "warning" },
-    );
-    return;
-  }
-
-  clearPreviewBlockedTimer();
-  clearPreviewReaderController();
-  const token = previewState.loadToken;
-  const controller = new AbortController();
-  previewState.readerController = controller;
-
-  setPreviewMode(elements, "reader");
-  clearPreviewReaderContent(elements);
-  setPreviewFallbackMessage(elements, "");
-  setPreviewLoadingVisible(elements, true, "Loading Reader View...");
-  setPreviewReaderButtonLoading(elements, true);
-
-  try {
-    const response = await fetch(`${READER_ENDPOINT}?url=${encodeURIComponent(safeUrl)}`, {
-      signal: controller.signal,
-      headers: {
-        Accept: "text/plain",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Reader request failed (${response.status}).`);
-    }
-
-    const html = await response.text();
-    if (
-      token !== previewState.loadToken ||
-      controller !== previewState.readerController ||
-      safeUrl !== previewState.activeUrl
-    ) {
-      return;
-    }
-
-    const finalUrl = response.headers.get("x-reader-final-url") || safeUrl;
-    const readabilityDocument = new DOMParser().parseFromString(html, "text/html");
-    if (readabilityDocument.head) {
-      const base = readabilityDocument.createElement("base");
-      base.href = finalUrl;
-      readabilityDocument.head.prepend(base);
-    }
-
-    const Readability = await getReadabilityCtor();
-    const article = new Readability(readabilityDocument).parse();
-
-    if (!article || (!article.content && !article.textContent)) {
-      throw new Error("No readable content was extracted.");
-    }
-
-    const safeContent = sanitizeReaderHTML(article.content || "", finalUrl);
-    if (!safeContent && article.textContent) {
-      const body = document.createElement("div");
-      body.className = "preview-reader-body";
-      body.textContent = article.textContent.trim();
-      elements.reader.replaceChildren(body);
-    } else if (!safeContent) {
-      throw new Error("No readable content was extracted.");
-    } else {
-      elements.reader.innerHTML = `
-        <article class="preview-reader-article">
-          <h3 class="preview-reader-title">${escapeHTML(article.title || "Reader View")}</h3>
-          ${article.excerpt ? `<p class="preview-reader-excerpt">${escapeHTML(article.excerpt)}</p>` : ""}
-          <div class="preview-reader-body">${safeContent}</div>
-        </article>
-      `;
-    }
-
-    setPreviewFallbackMessage(elements, "");
-  } catch (error) {
-    if (isAbortError(error) || controller.signal.aborted) {
-      return;
-    }
-    if (
-      token !== previewState.loadToken ||
-      controller !== previewState.readerController ||
-      safeUrl !== previewState.activeUrl
-    ) {
-      return;
-    }
-    setReaderViewError(elements, "Reader View could not extract this page.");
-    setPreviewFallbackMessage(elements, "Reader View failed. Use Open in new tab.", {
-      kind: "warning",
-    });
-  } finally {
-    if (controller === previewState.readerController) {
-      previewState.readerController = null;
-    }
-    if (token === previewState.loadToken) {
-      setPreviewLoadingVisible(elements, false);
-      setPreviewReaderButtonLoading(elements, false);
-    }
-  }
-}
-
-function toggleReaderView() {
-  const elements = getPreviewElements();
-  if (!elements || !previewState.activeUrl) {
-    return;
-  }
-
-  if (previewState.mode === "reader") {
-    clearPreviewReaderController();
-    openPreviewByUrl(previewState.activeUrl, { updateHash: false });
-    return;
-  }
-
-  openReaderView();
-}
-
-function wirePreviewPaneActions() {
-  const elements = getPreviewElements();
-  if (!elements || elements.pane.dataset.wired === "true") {
-    return;
-  }
-
-  elements.pane.dataset.wired = "true";
-  elements.closeButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    closePreview({ updateHash: true });
-  });
-  elements.readerButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    toggleReaderView();
-  });
-}
-
-async function openCommentsPreview(preview) {
-  const storyId = Number(preview?.storyId);
-  if (!Number.isFinite(storyId)) {
-    return false;
-  }
-
-  const elements = getPreviewElements();
-  if (!elements) {
-    return false;
-  }
-
-  const title = (preview?.title || `Story ${storyId}`).trim();
-  const hnUrl = `https://news.ycombinator.com/item?id=${storyId}`;
-  const domain = (preview?.domain || "").trim();
-
-  clearPreviewBlockedTimer();
-  clearPreviewReaderController();
-  clearPreviewCommentsController();
-  previewState.loadToken += 1;
-  const token = previewState.loadToken;
-  const controller = new AbortController();
-  previewState.commentsController = controller;
-
-  elements.titleEl.textContent = title;
-  elements.domainEl.textContent = domain ? `${domain} comments` : "HN comments";
-  elements.openLink.href = hnUrl;
-  elements.openLink.textContent = "Open thread";
-  elements.pane.classList.add("is-open");
-  elements.pane.setAttribute("aria-hidden", "false");
-  setPreviewMode(elements, "comments");
-  clearPreviewReaderContent(elements);
-  clearPreviewCommentsContent(elements, "Loading comments...");
-  setPreviewFallbackMessage(elements, "");
-  setPreviewLoadingVisible(elements, true, "Loading comments...");
-  previewState.activeUrl = hnUrl;
-  app.classList.add("is-preview-open");
-
-  if (preview?.row) {
-    setSelectedStoryElement(preview.row);
-  }
-
-  let thread = null;
-  try {
-    thread = await fetchThread(storyId, { signal: controller.signal });
-  } catch (error) {
-    if (
-      isAbortError(error) ||
-      controller.signal.aborted ||
-      controller !== previewState.commentsController ||
-      token !== previewState.loadToken
-    ) {
-      return false;
-    }
-    clearPreviewCommentsContent(elements, "Could not load comments.");
-    setPreviewFallbackMessage(elements, "Comments preview failed.", {
-      kind: "warning",
-    });
-    setPreviewLoadingVisible(elements, false);
-    return false;
-  }
-
-  if (
-    controller.signal.aborted ||
-    controller !== previewState.commentsController ||
-    token !== previewState.loadToken
-  ) {
-    return false;
-  }
-
-  if (!thread) {
-    clearPreviewCommentsContent(elements, "No comments available.");
-    setPreviewLoadingVisible(elements, false);
-    return false;
-  }
-
-  elements.commentsStory.replaceChildren();
-  const renderedStory = createElementFromHTML(renderStoryDetail(thread));
-  if (renderedStory) {
-    elements.commentsStory.appendChild(renderedStory);
-  } else {
-    elements.commentsStory.innerHTML = `
-      <div class="story-title">${escapeHTML(title)}</div>
-      <div class="story-meta"><span>Story preview unavailable.</span></div>
-    `;
-  }
-
-  const commentState = createCommentRenderState({
-    signal: controller.signal,
-    sectionEl: elements.commentsSection,
-    rootEl: elements.commentsRoot,
-    statusEl: elements.commentsStatus,
-  });
-  wireCommentActions(commentState);
-
-  const threadComments = normalizeThreadChildren(thread);
-  if (!threadComments.length) {
-    elements.commentsStatus.textContent = "No comments yet.";
-    setPreviewLoadingVisible(elements, false);
-    return true;
-  }
-
-  mountChildList(commentState, commentState.rootEl, threadComments, 0, { auto: true });
-  setPreviewLoadingVisible(elements, false);
-  return true;
-}
-
-function openPreview(preview, { updateHash = false } = {}) {
-  if (!preview?.url) {
-    return false;
-  }
-
-  const safeUrl = getSafeUrl(preview.url);
-  if (!safeUrl) {
-    return false;
-  }
-
-  const elements = getPreviewElements();
-  if (!elements) {
-    return false;
-  }
-
-  const title = (preview.title || safeUrl).trim();
-  const domain = (preview.domain || getDomain(safeUrl) || "").trim();
-
-  clearPreviewBlockedTimer();
-  clearPreviewReaderController();
-  clearPreviewCommentsController();
-  previewState.loadToken += 1;
-  const token = previewState.loadToken;
-
-  elements.titleEl.textContent = title;
-  elements.domainEl.textContent = domain;
-  elements.openLink.href = safeUrl;
-  elements.openLink.textContent = "Open in new tab";
-  elements.pane.classList.add("is-open");
-  elements.pane.setAttribute("aria-hidden", "false");
-  setPreviewMode(elements, "embed");
-  setPreviewReaderButtonLoading(elements, false);
-  clearPreviewReaderContent(elements);
-  clearPreviewCommentsContent(elements);
-
-  const protocol = new URL(safeUrl).protocol;
-  if (protocol === "http:") {
-    setPreviewLoadingVisible(elements, false);
-    setPreviewFallbackMessage(
-      elements,
-      "This link uses http:// and cannot be embedded on an https page. Use Open in new tab.",
-      { kind: "warning" },
-    );
-    elements.iframe.onload = null;
-    elements.iframe.onerror = null;
-    elements.iframe.removeAttribute("src");
-  } else {
-    setPreviewFallbackMessage(elements, "");
-    setPreviewLoadingVisible(elements, true, "Loading preview...");
-
-    elements.iframe.onload = () => {
-      if (token !== previewState.loadToken || previewState.mode !== "embed") {
-        return;
-      }
-      clearPreviewBlockedTimer();
-      setPreviewLoadingVisible(elements, false);
-      if (isFrameUsable(elements.iframe)) {
-        setPreviewFallbackMessage(elements, "");
-      } else {
-        setPreviewFallbackMessage(elements, PREVIEW_EMBED_BLOCKED_MESSAGE, { kind: "warning" });
-      }
-    };
-
-    elements.iframe.onerror = () => {
-      if (token !== previewState.loadToken || previewState.mode !== "embed") {
-        return;
-      }
-      clearPreviewBlockedTimer();
-      setPreviewLoadingVisible(elements, false);
-      setPreviewFallbackMessage(elements, PREVIEW_EMBED_BLOCKED_MESSAGE, { kind: "warning" });
-    };
-
-    elements.iframe.src = safeUrl;
-    previewState.blockedTimer = window.setTimeout(() => {
-      if (token !== previewState.loadToken || previewState.mode !== "embed") {
-        return;
-      }
-      setPreviewLoadingVisible(elements, false);
-      setPreviewFallbackMessage(elements, PREVIEW_EMBED_BLOCKED_MESSAGE, { kind: "warning" });
-    }, PREVIEW_BLOCK_TIMEOUT_MS);
-  }
-
-  previewState.activeUrl = safeUrl;
-  app.classList.add("is-preview-open");
-
-  if (preview.row) {
-    setSelectedStoryElement(preview.row);
-  }
-
-  if (updateHash) {
-    const nextHash = previewHashForUrl(safeUrl);
-    if (window.location.hash !== nextHash) {
-      window.location.hash = nextHash;
-    }
-  }
-
-  return true;
-}
-
-function openPreviewByUrl(url, { updateHash = false } = {}) {
-  const safeUrl = getSafeUrl(url);
-  if (!safeUrl) {
-    closePreview({ updateHash: false });
-    return false;
-  }
-
-  const matchedLink = findStoryLinkByPreviewUrl(safeUrl);
-  const linkedPreview = matchedLink
-    ? getPreviewDataFromLink(matchedLink)
-    : {
-        url: safeUrl,
-        title: safeUrl,
-        domain: getDomain(safeUrl),
-        row: null,
-      };
-
-  return openPreview(linkedPreview, { updateHash });
-}
-
-function closePreview({ updateHash = false } = {}) {
-  clearPreviewBlockedTimer();
-  clearPreviewReaderController();
-  clearPreviewCommentsController();
-  previewState.loadToken += 1;
-  previewState.activeUrl = "";
-  previewState.mode = "embed";
-
-  const elements = getPreviewElements();
-  if (elements) {
-    elements.pane.classList.remove("is-open");
-    elements.pane.setAttribute("aria-hidden", "true");
-    elements.titleEl.textContent = "Story preview";
-    elements.domainEl.textContent = "";
-    elements.openLink.removeAttribute("href");
-    elements.openLink.textContent = "Open in new tab";
-    setPreviewMode(elements, "embed");
-    setPreviewReaderButtonLoading(elements, false);
-    clearPreviewReaderContent(elements);
-    clearPreviewCommentsContent(elements);
-    setPreviewLoadingVisible(elements, false);
-    setPreviewFallbackMessage(elements, "");
-    elements.iframe.onload = null;
-    elements.iframe.onerror = null;
-    elements.iframe.removeAttribute("src");
-  }
-
-  app.classList.remove("is-preview-open");
-
-  if (updateHash && window.location.hash.startsWith(`#${PREVIEW_HASH_PREFIX}`)) {
-    window.location.hash = "";
-  }
-}
-
-function handleGlobalKeydown(event) {
-  if (event.defaultPrevented || event.key !== "Escape") {
-    return;
-  }
-
-  if (!app.classList.contains("is-preview-open")) {
-    return;
-  }
-
-  event.preventDefault();
-  closePreview({ updateHash: true });
 }
 
 function getListStoryElements() {
@@ -1070,6 +403,32 @@ function isEditableTarget(target) {
   return target.closest('[contenteditable=""], [contenteditable="true"]') !== null;
 }
 
+function getSelectedStoryId() {
+  const stories = getListStoryElements();
+  if (!stories.length) {
+    return null;
+  }
+
+  clampSelectedStoryIndex(stories);
+  const selectedStory = stories[selectedStoryIndex];
+  if (!selectedStory) {
+    return null;
+  }
+
+  const fromRow = Number(selectedStory.getAttribute("data-story-id"));
+  if (Number.isInteger(fromRow) && fromRow > 0) {
+    return fromRow;
+  }
+
+  const link = selectedStory.querySelector("[data-story-id]");
+  const fromLink = Number(link?.getAttribute("data-story-id"));
+  if (Number.isInteger(fromLink) && fromLink > 0) {
+    return fromLink;
+  }
+
+  return null;
+}
+
 function openSelectedStory() {
   const link = getSelectedStoryLink();
   if (!link) {
@@ -1089,6 +448,14 @@ function openSelectedStory() {
   }
 
   link.click();
+}
+
+function openSelectedDiscussion() {
+  const storyId = getSelectedStoryId();
+  if (!storyId) {
+    return;
+  }
+  navigateTo(`/item/${storyId}`);
 }
 
 function handleListKeyboardNavigation(event) {
@@ -1136,6 +503,12 @@ function handleListKeyboardNavigation(event) {
   if (event.key === "Enter") {
     event.preventDefault();
     openSelectedStory();
+    return;
+  }
+
+  if (event.key === "c" || event.key === "C") {
+    event.preventDefault();
+    openSelectedDiscussion();
   }
 }
 
@@ -1187,8 +560,11 @@ function teardownListSelection() {
   }
 }
 
-async function fetchJSON(url, { signal, errorPrefix = "Request failed" } = {}) {
-  const response = await fetch(url, { signal });
+async function fetchJSON(
+  url,
+  { signal, errorPrefix = "Request failed", cache = "default" } = {},
+) {
+  const response = await fetch(url, { signal, cache });
   if (!response.ok) {
     let message = `${errorPrefix}: ${response.status} (${url})`;
     try {
@@ -1203,38 +579,13 @@ async function fetchJSON(url, { signal, errorPrefix = "Request failed" } = {}) {
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   if (!contentType.includes("application/json")) {
     const body = await response.text();
-    const preview = body.slice(0, 200);
+    const snippet = body.slice(0, 200);
     throw new Error(
-      `${errorPrefix}: non-JSON response (${contentType || "unknown"}): ${preview}`,
+      `${errorPrefix}: non-JSON response (${contentType || "unknown"}): ${snippet}`,
     );
   }
 
   return response.json();
-}
-
-function isNotFoundError(error) {
-  return /\b404\b/.test(String(error?.message || ""));
-}
-
-async function fetchHNJSON(path, { signal, errorPrefix = "HN request failed" } = {}) {
-  const response = await fetch(`${HN_FALLBACK_BASE}/${path}`, { signal });
-  if (!response.ok) {
-    throw new Error(`${errorPrefix}: ${response.status}`);
-  }
-  return response.json();
-}
-
-async function fetchInChunks(items, limit, worker, { signal } = {}) {
-  const results = [];
-  for (let index = 0; index < items.length; index += limit) {
-    if (signal?.aborted) {
-      throw createAbortError();
-    }
-    const chunk = items.slice(index, index + limit);
-    const batch = await Promise.all(chunk.map(worker));
-    results.push(...batch);
-  }
-  return results;
 }
 
 async function fetchThread(id, { signal } = {}) {
@@ -1295,77 +646,54 @@ function createTaskQueue(limit, { signal } = {}) {
     });
 }
 
-async function getStories(feed, { signal, offset = 0, limit = PAGE_SIZE } = {}) {
+async function getStories(
+  feed,
+  { signal, offset = 0, limit = PAGE_SIZE } = {},
+) {
   const normalizedFeed = normalizeFeed(feed);
   const safeOffset = Math.max(0, Number(offset) || 0);
   const safeLimit = Math.max(1, Number(limit) || PAGE_SIZE);
+  const expectedUrl = `${STORIES_ENDPOINT}?feed=${normalizedFeed}&offset=${safeOffset}&limit=${safeLimit}`;
 
-  try {
-    const params = new URLSearchParams({
-      feed: normalizedFeed,
-      offset: String(safeOffset),
-      limit: String(safeLimit),
-    });
-    const payload = await fetchJSON(
-      `${STORIES_ENDPOINT}?${params.toString()}`,
-      {
-        signal,
-        errorPrefix: "Stories request failed",
-      },
-    );
-    return Array.isArray(payload) ? payload : [];
-  } catch (error) {
-    if (isAbortError(error) || !isNotFoundError(error)) {
-      throw error;
+  // Reuse the head-script prefetch for the first paint only.
+  const early = window.__hnxStoriesPrefetch;
+  if (early?.promise && early.url === expectedUrl) {
+    window.__hnxStoriesPrefetch = null;
+    try {
+      const stories = await early.promise;
+      if (Array.isArray(stories)) {
+        return stories;
+      }
+    } catch {
+      // fall through to a live fetch
     }
   }
 
-  const ids = await fetchHNJSON(`${normalizedFeed}stories.json`, {
-    signal,
-    errorPrefix: "Stories fallback failed",
+  // Same-origin only — no client-side Firebase/Algolia fallback (privacy).
+  const params = new URLSearchParams({
+    feed: normalizedFeed,
+    offset: String(safeOffset),
+    limit: String(safeLimit),
   });
-  const pageIds = (Array.isArray(ids) ? ids : [])
-    .map((id) => Number(id))
-    .filter((id) => Number.isInteger(id) && id > 0)
-    .slice(safeOffset, safeOffset + safeLimit);
-
-  const stories = await fetchInChunks(
-    pageIds,
-    FALLBACK_FETCH_CONCURRENCY,
-    (id) =>
-      fetchHNJSON(`item/${id}.json`, {
-        signal,
-        errorPrefix: "Story fallback item failed",
-      }).catch(() => null),
-    { signal },
-  );
-
-  return stories.filter((story) => story && Number.isFinite(Number(story.id)));
+  const payload = await fetchJSON(`${STORIES_ENDPOINT}?${params.toString()}`, {
+    signal,
+    cache: "no-store",
+    errorPrefix: "Stories request failed",
+  });
+  return Array.isArray(payload) ? payload : [];
 }
 
-async function getItem(id, { signal, forceRefresh = false } = {}) {
+async function getItem(id, { signal } = {}) {
   const numericId = Number(id);
   if (!Number.isInteger(numericId) || numericId <= 0) {
     return null;
   }
 
-  void forceRefresh;
-  try {
-    return await fetchJSON(`${ITEM_ENDPOINT}?id=${numericId}`, {
-      signal,
-      errorPrefix: "Item request failed",
-    });
-  } catch (error) {
-    if (isAbortError(error) || !isNotFoundError(error)) {
-      throw error;
-    }
-  }
-
-  const fallbackItem = await fetchHNJSON(`item/${numericId}.json`, {
+  return fetchJSON(`${ITEM_ENDPOINT}?id=${numericId}`, {
     signal,
-    errorPrefix: "Item fallback failed",
+    cache: "no-store",
+    errorPrefix: "Item request failed",
   });
-  return fallbackItem || null;
 }
 
 function getDomain(url) {
@@ -1415,12 +743,20 @@ function topbar(content) {
   const rightContent = content ?? "";
   return `
     <header class="topbar">
-      <a class="brand" href="#/">HNx</a>
       <div class="topbar-actions">
         ${rightContent}
         <div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
           ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
         </div>
+        <a class="privacy-link" href="/privacy.html">Privacy</a>
+        <button
+          class="theme-toggle"
+          type="button"
+          role="switch"
+          aria-checked="false"
+          aria-label="Use dark mode"
+          data-theme-toggle
+        ></button>
       </div>
     </header>
   `;
@@ -1437,30 +773,16 @@ function createLoadingRow(index, message = "loading...") {
   row.className = "story";
   row.dataset.storyRank = String(index);
   row.innerHTML = `
-    <div class="story-title"><span class="story-rank">${index}.</span><span class="story-title-text">${message}</span></div>
+    <div class="story-title"><span class="story-title-text">${message}</span></div>
     <div class="story-meta"><span>fetching story details...</span></div>
   `;
   return row;
 }
 
-function appendLoadingRows(listEl, count, startIndex) {
-  const slots = [];
-  const fragment = document.createDocumentFragment();
-
-  for (let i = 0; i < count; i += 1) {
-    const row = createLoadingRow(startIndex + i + 1);
-    slots.push(row);
-    fragment.appendChild(row);
-  }
-
-  listEl.appendChild(fragment);
-  return slots;
-}
-
 function renderFailedStoryRow(id, index) {
   return `
     <article class="story" data-story-rank="${index}">
-      <div class="story-title"><span class="story-rank">${index}.</span><span class="story-title-text">failed to load</span></div>
+      <div class="story-title"><span class="story-title-text">failed to load</span></div>
       <div class="story-meta">
         <span>item ${id}</span>
         <span><button class="btn" type="button" data-retry-id="${id}" data-retry-rank="${index}">retry</button></span>
@@ -1474,7 +796,6 @@ async function renderListPage() {
   currentViewController = controller;
   let infiniteObserver = null;
   let scrollFallbackHandler = null;
-
   const teardownInfiniteLoading = () => {
     if (infiniteObserver) {
       infiniteObserver.disconnect();
@@ -1497,51 +818,9 @@ async function renderListPage() {
         <p class="status" data-list-status hidden></p>
         <div data-list-sentinel aria-hidden="true"></div>
       </section>
-      <aside class="preview-pane" data-preview-pane aria-hidden="true">
-        <div class="preview-card">
-          <header class="preview-header">
-            <div class="preview-heading">
-              <h2 class="preview-title" data-preview-title>Story preview</h2>
-              <p class="preview-domain" data-preview-domain></p>
-            </div>
-            <div class="preview-actions">
-              <button class="btn" type="button" data-preview-reader aria-pressed="false">
-                Reader View
-              </button>
-              <a
-                class="btn"
-                href="#"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-preview-open
-              >
-                Open in new tab
-              </a>
-              <button class="btn" type="button" data-preview-close>Close</button>
-            </div>
-          </header>
-          <div class="preview-frame-wrap">
-            <iframe class="preview-frame" title="Story preview" data-preview-frame></iframe>
-            <section class="preview-reader" data-preview-reader-content hidden></section>
-            <section class="preview-comments" data-preview-comments hidden>
-              <article class="story story-detail preview-comments-story" data-preview-comments-story>
-                <div class="story-title">loading story...</div>
-                <div class="story-meta"><span class="status">fetching story details...</span></div>
-              </article>
-              <section class="comments" data-preview-comments-section aria-live="polite">
-                <h3 class="comments-title">Comments</h3>
-                <p class="status" data-preview-comments-status>Loading comments...</p>
-                <div class="comment-children" data-preview-comments-root></div>
-              </section>
-            </section>
-            <p class="preview-loading" data-preview-loading hidden>Loading preview...</p>
-            <p class="preview-fallback" data-preview-fallback hidden></p>
-          </div>
-        </div>
-      </aside>
     `;
+    wireThemeToggle();
     wireFeedToggleButtons();
-    wirePreviewPaneActions();
 
     const listEl = app.querySelector(".story-list");
     const listStatus = app.querySelector("[data-list-status]");
@@ -1551,7 +830,6 @@ async function renderListPage() {
     }
 
     initializeListSelection(listEl);
-    applyListRoute(parseRoute());
 
     const setListStatus = (value = "") => {
       const next = (value || "").trim();
@@ -1569,40 +847,21 @@ async function renderListPage() {
       }
       sourceRow.replaceWith(next);
       applyListSelection({ scroll: false });
-      applyListRoute(parseRoute());
     };
 
     listEl.addEventListener("click", async (event) => {
-      const commentsLink = event.target.closest("[data-comments-preview]");
-      if (commentsLink && listEl.contains(commentsLink)) {
-        if (isModifiedClick(event)) {
-          return;
-        }
-
-        event.preventDefault();
-
-        if (controller.signal.aborted || currentViewController !== controller) {
-          return;
-        }
-
-        const storyId = Number(commentsLink.getAttribute("data-story-id"));
-        if (!Number.isFinite(storyId)) {
-          return;
-        }
-
-        const storyRow = commentsLink.closest(".story");
-        await openCommentsPreview({
-          storyId,
-          title: commentsLink.getAttribute("data-story-title") || commentsLink.textContent || "",
-          domain: commentsLink.getAttribute("data-story-domain") || "",
-          row: storyRow,
-        });
-        return;
-      }
-
       const titleLink = event.target.closest(".story-title a");
       if (titleLink && listEl.contains(titleLink)) {
         const storyRow = titleLink.closest(".story");
+        if (storyRow) {
+          setSelectedStoryElement(storyRow);
+        }
+        return;
+      }
+
+      const discussionLink = event.target.closest("a.meta-time");
+      if (discussionLink && listEl.contains(discussionLink)) {
+        const storyRow = discussionLink.closest(".story");
         if (storyRow) {
           setSelectedStoryElement(storyRow);
         }
@@ -1634,7 +893,6 @@ async function renderListPage() {
       try {
         story = await getItem(id, {
           signal: controller.signal,
-          forceRefresh: true,
         });
       } catch (error) {
         if (isAbortError(error)) {
@@ -1659,6 +917,45 @@ async function renderListPage() {
     let nextBatchStart = 0;
     const seenStoryIds = new Set();
 
+    const handleBackgroundLoadError = (error) => {
+      if (
+        isAbortError(error) ||
+        controller.signal.aborted ||
+        currentViewController !== controller
+      ) {
+        return;
+      }
+      hasMore = false;
+      teardownInfiniteLoading();
+      setListStatus(`Could not load stories: ${error.message}`);
+    };
+
+    const loadNextBatchInBackground = () => {
+      void loadNextBatch().catch(handleBackgroundLoadError);
+    };
+
+    const shouldLoadMoreNow = () => {
+      if (!sentinel.isConnected) {
+        return false;
+      }
+      const rect = sentinel.getBoundingClientRect();
+      return rect.top <= window.innerHeight + 600;
+    };
+
+    const requestNextBatchIfNeeded = () => {
+      if (
+        hasMore &&
+        !isLoadingBatch &&
+        !controller.signal.aborted &&
+        currentViewController === controller &&
+        shouldLoadMoreNow()
+      ) {
+        window.setTimeout(() => {
+          loadNextBatchInBackground();
+        }, 0);
+      }
+    };
+
     const loadNextBatch = async () => {
       if (
         isLoadingBatch ||
@@ -1674,18 +971,12 @@ async function renderListPage() {
 
       try {
         const batchStart = nextBatchStart;
-        const preloadedStories = takePreloadedStories(currentFeed, {
+        const batchLimit = batchStart === 0 ? INITIAL_PAGE_SIZE : PAGE_SIZE;
+        const fetchedStories = await getStories(currentFeed, {
+          signal: controller.signal,
           offset: batchStart,
-          limit: PAGE_SIZE,
+          limit: batchLimit,
         });
-        const fetchedStories =
-          Array.isArray(preloadedStories) && preloadedStories.length > 0
-            ? preloadedStories
-            : await getStories(currentFeed, {
-                signal: controller.signal,
-                offset: batchStart,
-                limit: PAGE_SIZE,
-              });
         if (controller.signal.aborted || currentViewController !== controller) {
           return;
         }
@@ -1718,40 +1009,33 @@ async function renderListPage() {
 
         nextBatchStart += fetchedStories.length;
 
-        const slots = appendLoadingRows(listEl, batchStories.length, batchStart);
-        if (selectedStoryIndex < 0 && slots.length) {
-          selectedStoryIndex = 0;
-        }
-        applyListSelection({ scroll: false });
-        const nextRows = batchStories.map((story, index) => {
+        const fragment = document.createDocumentFragment();
+        const nextRows = [];
+        batchStories.forEach((story, index) => {
           const rank = batchStart + index + 1;
           const html =
             story && Number.isFinite(Number(story.id))
               ? renderStoryRow(story, rank)
               : renderFailedStoryRow("unknown", rank);
-          return createElementFromHTML(html);
+          const row = createElementFromHTML(html);
+          if (row) {
+            nextRows.push(row);
+            fragment.appendChild(row);
+          }
         });
 
-        nextRows.forEach((next, slotIndex) => {
-          if (controller.signal.aborted || currentViewController !== controller) {
-            return;
-          }
-          const current = slots[slotIndex];
-          if (!current || !current.isConnected || !next) {
-            return;
-          }
-          current.replaceWith(next);
-          slots[slotIndex] = next;
-        });
+        listEl.appendChild(fragment);
 
+        if (selectedStoryIndex < 0 && nextRows.length) {
+          selectedStoryIndex = 0;
+        }
         applyListSelection({ scroll: false });
-        applyListRoute(parseRoute());
 
         if (controller.signal.aborted || currentViewController !== controller) {
           return;
         }
 
-        if (fetchedStories.length < PAGE_SIZE) {
+        if (fetchedStories.length < batchLimit) {
           hasMore = false;
           teardownInfiniteLoading();
         }
@@ -1759,6 +1043,7 @@ async function renderListPage() {
         setListStatus("");
       } finally {
         isLoadingBatch = false;
+        requestNextBatchIfNeeded();
       }
     };
 
@@ -1767,7 +1052,7 @@ async function renderListPage() {
         (entries) => {
           const shouldLoad = entries.some((entry) => entry.isIntersecting);
           if (shouldLoad) {
-            void loadNextBatch();
+            loadNextBatchInBackground();
           }
         },
         { rootMargin: "600px 0px" },
@@ -1776,7 +1061,7 @@ async function renderListPage() {
     } else {
       scrollFallbackHandler = () => {
         if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600) {
-          void loadNextBatch();
+          loadNextBatchInBackground();
         }
       };
       window.addEventListener("scroll", scrollFallbackHandler, { passive: true });
@@ -1793,9 +1078,12 @@ async function renderListPage() {
       return;
     }
     app.innerHTML = `
-      ${topbar("")}
-      <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
+      <section class="list-pane">
+        ${topbar("")}
+        <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
+      </section>
     `;
+    wireThemeToggle();
     wireFeedToggleButtons();
   }
 }
@@ -1805,198 +1093,103 @@ function renderStoryRow(story, index) {
     return "";
   }
 
-  const domain = getDomain(story.url);
+  const storyId = Number(story.id);
+  const domain = story.domain || getDomain(story.url);
   const safeUrl = getSafeUrl(story.url);
-  const storyUrl = safeUrl || `https://news.ycombinator.com/item?id=${story.id}`;
+  const discussionPath = Number.isInteger(storyId) && storyId > 0 ? `#/item/${storyId}` : "#/";
+  const storyUrl = safeUrl || discussionPath;
   const storyTitleRaw = story.title || "Untitled";
   const storyTitle = escapeHTML(storyTitleRaw);
   const escapedStoryDomain = escapeHTML(domain);
   const escapedStoryUrl = escapeHTML(storyUrl);
+  const isExternal = Boolean(safeUrl);
   const titleContent = `
     <a
       href="${escapedStoryUrl}"
-      target="_blank"
-      rel="noopener noreferrer"
-      data-story-id="${story.id}"
-    ><span class="story-rank">${index}.</span><span class="story-title-text">${storyTitle}</span></a>
+      ${isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}
+      data-story-id="${storyId}"
+    ><span class="story-title-text">${storyTitle}</span></a>
   `;
 
   return `
-    <article class="story" data-story-rank="${index}">
+    <article class="story" data-story-rank="${index}" data-story-id="${storyId}">
       <div class="story-title">
         ${titleContent}
         ${domain ? `<span class="domain">(${escapedStoryDomain})</span>` : ""}
       </div>
       <div class="story-meta">
-        <span class="meta-time">${timeAgo(story.time)} ago</span>
+        <a class="meta-time" href="${escapeHTML(discussionPath)}">${timeAgo(story.time)} ago</a>
       </div>
     </article>
   `;
 }
 
-const SANITIZE_ALLOWED_TAGS = new Set([
-  "a",
-  "b",
-  "blockquote",
-  "br",
-  "code",
-  "em",
-  "i",
-  "li",
-  "ol",
-  "p",
-  "pre",
-  "span",
-  "strong",
-  "ul",
-]);
-
-function unwrapElement(element) {
-  const parent = element.parentNode;
-  if (!parent) {
-    return;
-  }
-  while (element.firstChild) {
-    parent.insertBefore(element.firstChild, element);
-  }
-  parent.removeChild(element);
-}
-
 function sanitizeHNHTML(value) {
-  const template = document.createElement("template");
-  template.innerHTML = value ?? "";
+  const clean = DOMPurify.sanitize(value ?? "", {
+    ALLOWED_TAGS: SANITIZE_ALLOWED_TAGS,
+    ALLOWED_ATTR: ["href"],
+    ALLOW_DATA_ATTR: false,
+    ALLOW_UNKNOWN_PROTOCOLS: false,
+    // http(s) only — blocks javascript:, data:, vbscript:, etc.
+    ALLOWED_URI_REGEXP: /^(?:https?:)/i,
+    RETURN_DOM_FRAGMENT: true,
+  });
 
-  const elements = Array.from(template.content.querySelectorAll("*"));
-  for (const element of elements) {
-    const tag = element.tagName.toLowerCase();
-
-    if (!SANITIZE_ALLOWED_TAGS.has(tag)) {
-      unwrapElement(element);
-      continue;
+  clean.querySelectorAll("a").forEach((anchor) => {
+    const safeHref = getSafeUrl(anchor.getAttribute("href"));
+    if (safeHref) {
+      anchor.setAttribute("href", safeHref);
+      anchor.setAttribute("rel", "noopener noreferrer");
+      anchor.setAttribute("target", "_blank");
+    } else {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("target");
+      anchor.removeAttribute("rel");
     }
+  });
 
-    Array.from(element.attributes).forEach((attribute) => {
-      const name = attribute.name.toLowerCase();
-      if (tag === "a" && name === "href") {
-        return;
-      }
-      element.removeAttribute(attribute.name);
-    });
-
-    if (tag === "a") {
-      const safeHref = getSafeUrl(element.getAttribute("href"));
-      if (safeHref) {
-        element.setAttribute("href", safeHref);
-        element.setAttribute("rel", "noopener noreferrer");
-        element.setAttribute("target", "_blank");
-      } else {
-        element.removeAttribute("href");
-      }
-    }
-  }
-
-  return template.innerHTML;
+  const serializer = document.createElement("div");
+  serializer.appendChild(clean);
+  return serializer.innerHTML;
 }
 
-const READER_SANITIZE_ALLOWED_TAGS = new Set([
-  "a",
-  "article",
-  "blockquote",
-  "br",
-  "code",
-  "em",
-  "figcaption",
-  "figure",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "hr",
-  "img",
-  "li",
-  "ol",
-  "p",
-  "pre",
-  "section",
-  "small",
-  "strong",
-  "sub",
-  "sup",
-  "table",
-  "tbody",
-  "td",
-  "th",
-  "thead",
-  "tr",
-  "ul",
-]);
-
-const READER_SANITIZE_ATTRS = {
-  a: new Set(["href"]),
-  img: new Set(["src", "alt", "title"]),
-  td: new Set(["colspan", "rowspan"]),
-  th: new Set(["colspan", "rowspan"]),
-};
-
-function sanitizeReaderHTML(value, baseUrl) {
-  const template = document.createElement("template");
-  template.innerHTML = value ?? "";
-
-  const elements = Array.from(template.content.querySelectorAll("*"));
-  for (const element of elements) {
-    const tag = element.tagName.toLowerCase();
-    if (!READER_SANITIZE_ALLOWED_TAGS.has(tag)) {
-      unwrapElement(element);
-      continue;
-    }
-
-    const allowedAttrs = READER_SANITIZE_ATTRS[tag] ?? null;
-    Array.from(element.attributes).forEach((attribute) => {
-      const name = attribute.name.toLowerCase();
-      if (name.startsWith("on")) {
-        element.removeAttribute(attribute.name);
-        return;
-      }
-      if (!allowedAttrs || !allowedAttrs.has(name)) {
-        element.removeAttribute(attribute.name);
-      }
-    });
-
-    if (tag === "a") {
-      const safeHref = getSafeResolvedUrl(element.getAttribute("href"), baseUrl);
-      if (safeHref) {
-        element.setAttribute("href", safeHref);
-        element.setAttribute("target", "_blank");
-        element.setAttribute("rel", "noopener noreferrer");
-      } else {
-        element.removeAttribute("href");
-      }
-      continue;
-    }
-
-    if (tag === "img") {
-      const safeSrc = getSafeResolvedUrl(element.getAttribute("src"), baseUrl);
-      if (!safeSrc) {
-        element.remove();
-        continue;
-      }
-      element.setAttribute("src", safeSrc);
-      element.setAttribute("loading", "lazy");
-      element.setAttribute("decoding", "async");
-      element.setAttribute("referrerpolicy", "no-referrer");
-    }
+function normalizeStoryDetail(story) {
+  if (!story || typeof story !== "object") {
+    return null;
   }
 
-  return template.innerHTML.trim();
+  const id = Number(story.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return null;
+  }
+
+  const time = Number(story.time ?? story.created_at_i);
+  const url = typeof story.url === "string" ? story.url : "";
+  const by =
+    (typeof story.by === "string" && story.by) ||
+    (typeof story.author === "string" && story.author) ||
+    "";
+
+  return {
+    id,
+    title: typeof story.title === "string" ? story.title : "",
+    url,
+    by,
+    time: Number.isFinite(time) ? time : 0,
+    text: typeof story.text === "string" ? story.text : "",
+    score: Number.isFinite(Number(story.score ?? story.points))
+      ? Number(story.score ?? story.points)
+      : 0,
+  };
 }
 
 function renderStoryDetail(story) {
-  const domain = getDomain(story.url);
-  const safeUrl = getSafeUrl(story.url);
-  const title = escapeHTML(story.title || "Untitled");
-  const storyText = story.text ? sanitizeHNHTML(story.text) : "";
+  const normalized = normalizeStoryDetail(story) || story;
+  const domain = getDomain(normalized.url);
+  const safeUrl = getSafeUrl(normalized.url);
+  const title = escapeHTML(normalized.title || "Untitled");
+  const storyText = normalized.text ? sanitizeHNHTML(normalized.text) : "";
+  const byline = normalized.by ? escapeHTML(normalized.by) : "";
 
   return `
     <article class="story story-detail">
@@ -2005,7 +1198,8 @@ function renderStoryDetail(story) {
         ${domain ? `<span class="domain">(${escapeHTML(domain)})</span>` : ""}
       </div>
       <div class="story-meta">
-        <span class="meta-time">${timeAgo(story.time)} ago</span>
+        ${byline ? `<span class="meta-user">${byline}</span>` : ""}
+        <span class="meta-time">${timeAgo(normalized.time)} ago</span>
       </div>
       ${storyText ? `<div class="story-text">${storyText}</div>` : ""}
     </article>
@@ -2409,11 +1603,14 @@ function wireCommentActions(state) {
 async function renderStoryPage(id) {
   const storyId = Number(id);
   app.dataset.view = "story";
-  if (!Number.isFinite(storyId)) {
+  if (!Number.isFinite(storyId) || storyId <= 0) {
     app.innerHTML = `
-      ${topbar('<a class="btn" href="#/">back</a>')}
-      <p class="status">Invalid story id.</p>
+      <section class="list-pane">
+        ${topbar('<a class="btn" href="#/">back</a>')}
+        <p class="status">Invalid story id.</p>
+      </section>
     `;
+    wireThemeToggle();
     wireFeedToggleButtons();
     return;
   }
@@ -2422,17 +1619,20 @@ async function renderStoryPage(id) {
   currentViewController = controller;
 
   app.innerHTML = `
-    ${topbar('<a class="btn" href="#/">back</a>')}
-    <article class="story story-detail">
-      <div class="story-title">loading story...</div>
-      <div class="story-meta"><span class="status">fetching story details...</span></div>
-    </article>
-    <section class="comments" aria-live="polite">
-      <h2 class="comments-title">Comments</h2>
-      <p class="status" data-comments-status>Loading comments...</p>
-      <div class="comment-children" data-comments-root></div>
+    <section class="list-pane">
+      ${topbar('<a class="btn" href="#/">back</a>')}
+      <article class="story story-detail">
+        <div class="story-title">loading story...</div>
+        <div class="story-meta"><span class="status">fetching story details...</span></div>
+      </article>
+      <section class="comments" aria-live="polite">
+        <h2 class="comments-title">Comments</h2>
+        <p class="status" data-comments-status>Loading comments...</p>
+        <div class="comment-children" data-comments-root></div>
+      </section>
     </section>
   `;
+  wireThemeToggle();
   wireFeedToggleButtons();
 
   const detailSlot = app.querySelector(".story-detail");
@@ -2444,7 +1644,7 @@ async function renderStoryPage(id) {
     return;
   }
 
-  // Fetch thread directly — it includes story metadata, so no separate getItem call needed.
+  // Thread endpoint includes story metadata + nested comments (Algolia shape).
   let thread = null;
   try {
     thread = await fetchThread(storyId, { signal: controller.signal });
@@ -2469,7 +1669,7 @@ async function renderStoryPage(id) {
     return;
   }
 
-  if (!thread) {
+  if (!thread || !normalizeStoryDetail(thread)) {
     detailSlot.innerHTML = `
       <div class="story-title">story not found</div>
     `;
@@ -2500,10 +1700,18 @@ async function renderStoryPage(id) {
   mountChildList(commentState, commentState.rootEl, threadComments, 0, { auto: true });
 }
 
+// Drop any previously installed service worker / caches so posts always load fresh.
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((error) => {
-      console.error("Service worker registration failed.", error);
+  void navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((reg) => {
+      void reg.unregister();
+    });
+  });
+}
+if (typeof caches !== "undefined") {
+  void caches.keys().then((keys) => {
+    keys.forEach((key) => {
+      void caches.delete(key);
     });
   });
 }

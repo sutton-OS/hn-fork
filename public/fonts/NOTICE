@@ -1,0 +1,11 @@
+Fonts bundled with HNx
+
+Poppins (Regular)
+  Copyright 2020 The Poppins Project Authors
+  Licensed under the SIL Open Font License, Version 1.1
+  https://scripts.sil.org/OFL
+  Source: https://fonts.google.com/specimen/Poppins
+  Self-hosted here so the browser never contacts Google Fonts.
+
+Berkeley Mono (Regular)
+  Licensed separately for this project; self-hosted for first-party delivery.
