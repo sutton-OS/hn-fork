@@ -868,6 +868,10 @@ a.story-url:focus-visible {
   letter-spacing: -0.02em;
 }
 
+.privacy-theme-toggle {
+  margin-left: auto;
+}
+
 .privacy-content {
   display: grid;
   gap: 0.85rem;

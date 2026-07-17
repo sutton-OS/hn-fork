@@ -11,13 +11,22 @@
     />
     <title>Privacy — HNx</title>
     <link rel="icon" type="image/png" href="/favicon.png?v=2" />
-    <link rel="stylesheet" href="./styles.css?v=28" />
+    <script src="./theme-init.js?v=29"></script>
+    <link rel="stylesheet" href="./styles.css?v=29" />
   </head>
   <body class="privacy-page">
     <main class="privacy-shell">
       <header class="privacy-header">
         <a class="btn" href="/">← HNx</a>
         <h1>Privacy</h1>
+        <button
+          class="theme-toggle privacy-theme-toggle"
+          type="button"
+          role="switch"
+          aria-checked="true"
+          aria-label="Use light mode"
+          data-theme-toggle
+        ></button>
       </header>
 
       <article class="privacy-content">
@@ -32,8 +41,10 @@
           <li><strong>No analytics or ads.</strong> No trackers, pixels, or marketing SDKs.</li>
           <li><strong>No third-party scripts in your browser.</strong> Fonts and libraries are self-hosted.</li>
           <li>
-            <strong>No persistent preferences.</strong> Theme and feed choices stay in memory for the
-            session and are not written to cookies or local storage.
+            <strong>Session-only theme.</strong> Light/dark mode is stored in
+            <code>sessionStorage</code> for this tab only (so this page can match the app).
+            It is not written to cookies or long-term local storage, and it clears when
+            the tab is closed. Feed choice stays in memory only.
           </li>
         </ul>
 
@@ -133,5 +144,6 @@
         <p class="privacy-updated">Last updated: 2026-07-17</p>
       </article>
     </main>
+    <script src="./privacy.js?v=29" defer></script>
   </body>
 </html>

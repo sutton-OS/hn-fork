@@ -10,6 +10,7 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - **Vendored DOMPurify** for comment/HTML sanitization (no CDN)
 - **Strict security headers** (CSP, HSTS, Referrer-Policy, Permissions-Policy, COOP/CORP)
 - **No open URL-fetch proxy**
+- **Theme** uses tab `sessionStorage` only (so the privacy page matches light/dark)
 - See [`public/privacy.html`](public/privacy.html) for the user-facing policy
 
 ## Structure

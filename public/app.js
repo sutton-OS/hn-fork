@@ -19,6 +19,8 @@ const FEED_NEW = "new";
 const FEEDS = [FEED_BEST, FEED_TOP, FEED_NEW];
 const LIST_VISIBLE_REFRESH_AFTER_MS = 60 * 1000;
 const THREAD_PREFETCH_MAX = 24;
+/** Session-only theme key (survives privacy page navigation; clears with the tab). */
+const THEME_STORAGE_KEY = "hnx-theme";
 const SANITIZE_ALLOWED_TAGS = [
   "a",
   "b",
@@ -50,8 +52,8 @@ const commentActionHandlers = new WeakMap();
 /** @type {Map<string, Promise<unknown>>} */
 const threadPrefetchCache = new Map();
 
-// Always start dark; theme/feed are session-only (not persisted).
-applyTheme("dark");
+// Theme is session-only (sessionStorage) so privacy.html can match; feed stays in memory.
+applyTheme(readStoredTheme());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("pageshow", handlePageShow);
 document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -148,9 +150,18 @@ function normalizeFeed(feed) {
   return FEEDS.includes(feed) ? feed : FEED_BEST;
 }
 
+function readStoredTheme() {
+  try {
+    const stored = sessionStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
 function updateThemeToggle() {
   const isDark = document.documentElement.dataset.theme === "dark";
-  app.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
     button.setAttribute("aria-checked", isDark ? "true" : "false");
     button.setAttribute("aria-label", isDark ? "Use light mode" : "Use dark mode");
   });
@@ -163,6 +174,11 @@ function applyTheme(theme) {
   document
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute("content", nextTheme === "dark" ? "#111111" : "#f3efe8");
+  try {
+    sessionStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  } catch {
+    /* ignore quota / private mode */
+  }
   updateThemeToggle();
 }
 
