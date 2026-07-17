@@ -604,20 +604,20 @@ html[data-theme="dark"] .app {
   gap: 0.45rem 0.75rem;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 0.5rem; /* ~33% smaller than prior 0.74rem */
+  font-size: 0.7rem;
 }
 
 .comment-replies-btn {
   margin-left: auto;
-  min-height: 22px;
-  padding: 0.2rem 0.45rem;
+  min-height: 26px;
+  padding: 0.25rem 0.55rem;
   border: 1px solid transparent;
   border-radius: 999px;
   background: var(--panel-soft);
   color: var(--muted);
   font: inherit;
   font-family: var(--font-mono);
-  font-size: 0.48rem;
+  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
@@ -655,11 +655,10 @@ html[data-theme="dark"] .app {
 }
 
 .comment-text {
-  margin-top: 6px;
+  margin-top: 8px;
   max-width: var(--content-max);
-  /* ~33% smaller than body (16px → ~10.7px) */
-  font-size: 0.67rem;
-  line-height: 1.65;
+  font-size: 14px;
+  line-height: 1.68;
 }
 
 .comment-text.is-clamped {
@@ -669,14 +668,14 @@ html[data-theme="dark"] .app {
 }
 
 .comment-show-more {
-  margin-top: 4px;
+  margin-top: 6px;
   padding: 0;
   border: 0;
   background: none;
   color: var(--muted);
   font: inherit;
   font-family: var(--font-mono);
-  font-size: 0.5rem;
+  font-size: 0.7rem;
   cursor: pointer;
   text-decoration: underline;
   text-decoration-color: var(--link-line);
