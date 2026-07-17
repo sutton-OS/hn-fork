@@ -4,17 +4,15 @@ const {
   getQueryString,
   parsePositiveInt,
   parseNonNegativeInt,
+  normalizeFeed,
+  feedPath,
   normalizeListItem,
   fetchJSON,
   mapWithConcurrency,
   statusFromError,
+  UPSTREAM,
 } = require("../lib/hn");
 
-const FEEDS = { best: "beststories", top: "topstories", new: "newstories" };
-const MAX_CONCURRENCY = 40;
-const DEFAULT_PAGE_SIZE = 30;
-const MAX_PAGE_SIZE = 120;
-const STORIES_TIMEOUT_MS = 8000;
 const UA = "hnx-stories/1.0";
 
 module.exports = async function handler(req, res) {
@@ -24,21 +22,20 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const feed = getQueryString(req.query?.feed).trim().toLowerCase();
-  const feedKey = FEEDS[feed] || FEEDS.best;
+  const feed = normalizeFeed(getQueryString(req.query?.feed));
   const offset = parseNonNegativeInt(getQueryString(req.query?.offset), 0);
   const limit = Math.min(
-    parsePositiveInt(getQueryString(req.query?.limit), DEFAULT_PAGE_SIZE),
-    MAX_PAGE_SIZE,
+    parsePositiveInt(getQueryString(req.query?.limit), UPSTREAM.storiesDefaultLimit),
+    UPSTREAM.storiesMaxLimit,
   );
 
   const controller = new AbortController();
   const timer = setTimeout(() => {
     controller.abort();
-  }, STORIES_TIMEOUT_MS);
+  }, UPSTREAM.storiesTimeoutMs);
 
   try {
-    const ids = await fetchJSON(`${HN_BASE_URL}/${feedKey}.json`, {
+    const ids = await fetchJSON(`${HN_BASE_URL}/${feedPath(feed)}.json`, {
       signal: controller.signal,
       userAgent: UA,
     });
@@ -52,28 +49,33 @@ module.exports = async function handler(req, res) {
       .map((id) => Number(id))
       .filter((id) => Number.isInteger(id) && id > 0);
     const pageIds = normalizedIds.slice(offset, offset + limit);
+    const nextOffset = offset + pageIds.length;
+    const hasMore = nextOffset < normalizedIds.length;
 
-    if (!pageIds.length) {
-      res.status(200);
-      res.setHeader("content-type", "application/json; charset=utf-8");
-      res.setHeader("cache-control", "no-store");
-      res.send("[]");
-      return;
+    let stories = [];
+    if (pageIds.length) {
+      const results = await mapWithConcurrency(
+        pageIds,
+        UPSTREAM.concurrency,
+        (id) =>
+          fetchJSON(`${HN_BASE_URL}/item/${id}.json`, {
+            signal: controller.signal,
+            userAgent: UA,
+          }).catch(() => null),
+      );
+      stories = results.map((item) => normalizeListItem(item)).filter(Boolean);
     }
 
-    const results = await mapWithConcurrency(pageIds, MAX_CONCURRENCY, (id) =>
-      fetchJSON(`${HN_BASE_URL}/item/${id}.json`, {
-        signal: controller.signal,
-        userAgent: UA,
-      }).catch(() => null),
-    );
-
-    const stories = results.map((item) => normalizeListItem(item)).filter(Boolean);
-
-    res.status(200);
-    res.setHeader("content-type", "application/json; charset=utf-8");
-    res.setHeader("cache-control", "no-store");
-    res.send(JSON.stringify(stories));
+    // Structured pagination: nextOffset advances by id-window, not filtered length.
+    sendJSON(res, 200, {
+      feed,
+      stories,
+      offset,
+      limit,
+      nextOffset,
+      total: normalizedIds.length,
+      hasMore,
+    });
   } catch (error) {
     if (error?.name === "AbortError") {
       sendJSON(res, 504, { error: "Stories request timed out." });

@@ -46,6 +46,13 @@ For a static-only UI smoke check:
 python3 -m http.server 8080 -d public
 ```
 
+## Test / check
+
+```sh
+npm test    # unit tests for lib/hn + lib/html
+npm run check  # syntax-check API + client entrypoints
+```
+
 ## Deploy
 
 Deploy on Vercel. Static files live in `public/`, and serverless endpoints live in `api/`. There is no build step.

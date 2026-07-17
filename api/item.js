@@ -1,13 +1,13 @@
 const {
   HN_BASE_URL,
   sendJSON,
-  getQueryString,
+  parseItemId,
   normalizeItem,
   fetchJSON,
   statusFromError,
+  UPSTREAM,
 } = require("../lib/hn");
 
-const ITEM_TIMEOUT_MS = 8000;
 const UA = "hnx-item/1.0";
 
 module.exports = async function handler(req, res) {
@@ -17,9 +17,8 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const rawId = getQueryString(req.query?.id);
-  const id = Number(rawId);
-  if (!rawId || !Number.isInteger(id) || id <= 0) {
+  const id = parseItemId(req.query?.id);
+  if (!id) {
     sendJSON(res, 400, { error: "Invalid id parameter." });
     return;
   }
@@ -27,7 +26,7 @@ module.exports = async function handler(req, res) {
   const controller = new AbortController();
   const timer = setTimeout(() => {
     controller.abort();
-  }, ITEM_TIMEOUT_MS);
+  }, UPSTREAM.storiesTimeoutMs);
 
   try {
     const rawItem = await fetchJSON(`${HN_BASE_URL}/item/${id}.json`, {
@@ -41,10 +40,7 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    res.status(200);
-    res.setHeader("content-type", "application/json; charset=utf-8");
-    res.setHeader("cache-control", "no-store");
-    res.send(JSON.stringify(item));
+    sendJSON(res, 200, item);
   } catch (error) {
     if (error?.name === "AbortError") {
       sendJSON(res, 504, { error: "Item request timed out." });

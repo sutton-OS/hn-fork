@@ -40,7 +40,6 @@ const SANITIZE_ALLOWED_TAGS = [
 const app = document.getElementById("app");
 app?.classList.add("shell");
 
-const unescape = document.createElement("textarea");
 let currentViewController = null;
 let selectedStoryIndex = -1;
 let listKeyboardHandler = null;
@@ -123,11 +122,6 @@ function parseRoute() {
     return { type: "list" };
   }
 
-  const pageMatch = hash.match(/^\/page\/(\d+)$/);
-  if (pageMatch) {
-    return { type: "list" };
-  }
-
   const storyMatch = hash.match(/^\/(?:item|story)\/(\d+)$/);
   if (storyMatch) {
     return { type: "story", id: Number(storyMatch[1]) };
@@ -142,8 +136,12 @@ function parseRoute() {
 }
 
 function escapeHTML(value) {
-  unescape.textContent = value ?? "";
-  return unescape.innerHTML;
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function normalizeFeed(feed) {
@@ -758,6 +756,32 @@ function createTaskQueue(limit, { signal } = {}) {
     });
 }
 
+function normalizeStoriesPage(payload, { offset = 0, limit = PAGE_SIZE } = {}) {
+  // New contract: { stories, nextOffset, hasMore, total }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const stories = Array.isArray(payload.stories) ? payload.stories : [];
+    const nextOffset = Number(payload.nextOffset);
+    const hasMore = Boolean(payload.hasMore);
+    return {
+      stories,
+      nextOffset: Number.isFinite(nextOffset)
+        ? nextOffset
+        : offset + stories.length,
+      hasMore,
+      total: Number(payload.total) || 0,
+    };
+  }
+
+  // Legacy array response fallback.
+  const stories = Array.isArray(payload) ? payload : [];
+  return {
+    stories,
+    nextOffset: offset + stories.length,
+    hasMore: stories.length >= limit,
+    total: 0,
+  };
+}
+
 async function getStories(
   feed,
   { signal, offset = 0, limit = PAGE_SIZE } = {},
@@ -772,16 +796,19 @@ async function getStories(
   if (early?.promise && early.url === expectedUrl) {
     window.__hnxStoriesPrefetch = null;
     try {
-      const stories = await early.promise;
-      if (Array.isArray(stories)) {
-        return stories;
+      const payload = await early.promise;
+      if (payload) {
+        return normalizeStoriesPage(payload, {
+          offset: safeOffset,
+          limit: safeLimit,
+        });
       }
     } catch {
       // fall through to a live fetch
     }
   }
 
-  // Same-origin only — no client-side Firebase/Algolia fallback (privacy).
+  // Same-origin only — no client-side Firebase fallback (privacy).
   const params = new URLSearchParams({
     feed: normalizedFeed,
     offset: String(safeOffset),
@@ -792,7 +819,7 @@ async function getStories(
     cache: "no-store",
     errorPrefix: "Stories request failed",
   });
-  return Array.isArray(payload) ? payload : [];
+  return normalizeStoriesPage(payload, { offset: safeOffset, limit: safeLimit });
 }
 
 async function getItem(id, { signal } = {}) {
@@ -819,12 +846,24 @@ function getDomain(url) {
   }
 }
 
+function decodeBasicEntities(value) {
+  return String(value ?? "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x2f;/gi, "/")
+    .replace(/&#0*47;/g, "/");
+}
+
 function getSafeUrl(url) {
   if (!url) {
     return null;
   }
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(decodeBasicEntities(url).trim());
     if (parsed.protocol === "http:" || parsed.protocol === "https:") {
       return parsed.href;
     }
@@ -1090,7 +1129,7 @@ async function renderListPage() {
       try {
         const batchStart = nextBatchStart;
         const batchLimit = batchStart === 0 ? INITIAL_PAGE_SIZE : PAGE_SIZE;
-        const fetchedStories = await getStories(currentFeed, {
+        const page = await getStories(currentFeed, {
           signal: controller.signal,
           offset: batchStart,
           limit: batchLimit,
@@ -1099,8 +1138,13 @@ async function renderListPage() {
           return;
         }
 
-        if (!fetchedStories.length) {
-          hasMore = false;
+        const fetchedStories = Array.isArray(page.stories) ? page.stories : [];
+        nextBatchStart = Number.isFinite(page.nextOffset)
+          ? page.nextOffset
+          : batchStart + batchLimit;
+        hasMore = Boolean(page.hasMore);
+
+        if (!fetchedStories.length && !hasMore) {
           teardownInfiniteLoading();
           setListStatus(batchStart === 0 ? "No stories available." : "");
           return;
@@ -1118,23 +1162,24 @@ async function renderListPage() {
           return true;
         });
 
+        // Empty filtered page but more IDs remain — keep scrolling.
         if (!batchStories.length) {
-          hasMore = false;
-          teardownInfiniteLoading();
+          if (!hasMore) {
+            teardownInfiniteLoading();
+          }
           setListStatus("");
           return;
         }
 
-        nextBatchStart += fetchedStories.length;
-
         const fragment = document.createDocumentFragment();
         const nextRows = [];
-        batchStories.forEach((story, index) => {
-          const rank = batchStart + index + 1;
+        let visibleRank = listEl.querySelectorAll(".story").length;
+        batchStories.forEach((story) => {
+          visibleRank += 1;
           const html =
             story && Number.isFinite(Number(story.id))
-              ? renderStoryRow(story, rank)
-              : renderFailedStoryRow("unknown", rank);
+              ? renderStoryRow(story, visibleRank)
+              : renderFailedStoryRow("unknown", visibleRank);
           const row = createElementFromHTML(html);
           if (row) {
             nextRows.push(row);
@@ -1153,8 +1198,7 @@ async function renderListPage() {
           return;
         }
 
-        if (fetchedStories.length < batchLimit) {
-          hasMore = false;
+        if (!hasMore) {
           teardownInfiniteLoading();
         }
 
@@ -1281,12 +1325,9 @@ function normalizeStoryDetail(story) {
     return null;
   }
 
-  const time = Number(story.time ?? story.created_at_i);
+  const time = Number(story.time);
   const url = typeof story.url === "string" ? story.url : "";
-  const by =
-    (typeof story.by === "string" && story.by) ||
-    (typeof story.author === "string" && story.author) ||
-    "";
+  const by = typeof story.by === "string" ? story.by : "";
 
   return {
     id,
@@ -1295,9 +1336,7 @@ function normalizeStoryDetail(story) {
     by,
     time: Number.isFinite(time) ? time : 0,
     text: typeof story.text === "string" ? story.text : "",
-    score: Number.isFinite(Number(story.score ?? story.points))
-      ? Number(story.score ?? story.points)
-      : 0,
+    score: Number.isFinite(Number(story.score)) ? Number(story.score) : 0,
   };
 }
 
@@ -1348,15 +1387,12 @@ function normalizeThreadComment(node) {
     return null;
   }
 
-  const time = Number(node.time ?? node.created_at_i);
-  const replyCount = Number(node.replyCount ?? node.reply_count ?? 0);
+  const time = Number(node.time);
+  const replyCount = Number(node.replyCount ?? 0);
 
   return {
     id,
-    by:
-      (typeof node.by === "string" && node.by) ||
-      (typeof node.author === "string" && node.author) ||
-      "unknown",
+    by: (typeof node.by === "string" && node.by) || "unknown",
     time: Number.isFinite(time) ? time : 0,
     text: typeof node.text === "string" ? node.text : "",
     replyCount: Number.isFinite(replyCount) && replyCount > 0 ? replyCount : 0,
@@ -1737,7 +1773,9 @@ async function fetchAndMountReplies(state, model) {
     }
 
     const comments = Array.isArray(data?.comments) ? data.comments : [];
-    const nextOffset = (Number(data?.offset) || 0) + comments.length;
+    const nextOffset = Number.isFinite(Number(data?.nextOffset))
+      ? Number(data.nextOffset)
+      : (Number(data?.offset) || 0) + comments.length;
     const total = Number(data?.total) || model.replyCount;
     const hasMore = Boolean(data?.hasMore);
 
@@ -1827,8 +1865,9 @@ async function loadMoreServerPage(state, listModel) {
       .map((c) => normalizeThreadComment(c))
       .filter(Boolean);
     listModel.items.push(...comments);
-    listModel.serverNextOffset =
-      (Number(data?.offset) || listModel.serverNextOffset) + comments.length;
+    listModel.serverNextOffset = Number.isFinite(Number(data?.nextOffset))
+      ? Number(data.nextOffset)
+      : listModel.serverNextOffset + comments.length;
     listModel.serverHasMore = Boolean(data?.hasMore);
     listModel.serverTotal = Number(data?.total) || listModel.serverTotal;
 
@@ -2101,8 +2140,9 @@ async function loadMoreRootComments(state, parentId) {
     }
 
     const comments = Array.isArray(data?.comments) ? data.comments : [];
-    state.rootNextOffset =
-      (Number(data?.offset) || state.rootNextOffset) + comments.length;
+    state.rootNextOffset = Number.isFinite(Number(data?.nextOffset))
+      ? Number(data.nextOffset)
+      : state.rootNextOffset + comments.length;
     state.rootHasMore = Boolean(data?.hasMore);
     state.rootTotal = Number(data?.total) || state.rootTotal;
 
@@ -2112,8 +2152,9 @@ async function loadMoreRootComments(state, parentId) {
       listModel.items.push(
         ...comments.map((c) => normalizeThreadComment(c)).filter(Boolean),
       );
+      // Root pagination is footer-only — keep in-list server controls off.
       listModel.serverNextOffset = state.rootNextOffset;
-      listModel.serverHasMore = state.rootHasMore;
+      listModel.serverHasMore = false;
       listModel.serverTotal = state.rootTotal;
       loadChildBatch(state, listModel, { manual: true });
     } else {
@@ -2122,7 +2163,7 @@ async function loadMoreRootComments(state, parentId) {
         serverParentId: parentId,
         serverNextOffset: state.rootNextOffset,
         serverTotal: state.rootTotal,
-        serverHasMore: state.rootHasMore,
+        serverHasMore: false,
       });
     }
 
@@ -2318,8 +2359,9 @@ async function renderStoryPage(id) {
   });
 
   const rootComments = Array.isArray(thread?.comments) ? thread.comments : [];
-  commentState.rootNextOffset =
-    (Number(thread?.offset) || 0) + rootComments.length;
+  commentState.rootNextOffset = Number.isFinite(Number(thread?.nextOffset))
+    ? Number(thread.nextOffset)
+    : (Number(thread?.offset) || 0) + rootComments.length;
   commentState.rootTotal = Number(thread?.total) || rootComments.length;
   commentState.rootHasMore = Boolean(thread?.hasMore);
 
@@ -2331,12 +2373,13 @@ async function renderStoryPage(id) {
     return;
   }
 
+  // Footer owns root "load more" — avoid a second in-list control.
   mountChildList(commentState, commentState.rootEl, rootComments, 0, {
     auto: true,
     serverParentId: storyId,
     serverNextOffset: commentState.rootNextOffset,
     serverTotal: commentState.rootTotal,
-    serverHasMore: commentState.rootHasMore,
+    serverHasMore: false,
   });
   renderRootMoreFooter(commentState, storyId);
   updateCommentStatus(commentState);
@@ -2349,18 +2392,11 @@ async function renderStoryPage(id) {
 }
 
 
-// Drop any previously installed service worker / caches so posts always load fresh.
+// One-time cleanup for older installs that registered a service worker.
 if ("serviceWorker" in navigator) {
   void navigator.serviceWorker.getRegistrations().then((regs) => {
     regs.forEach((reg) => {
       void reg.unregister();
-    });
-  });
-}
-if (typeof caches !== "undefined") {
-  void caches.keys().then((keys) => {
-    keys.forEach((key) => {
-      void caches.delete(key);
     });
   });
 }

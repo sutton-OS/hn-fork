@@ -915,10 +915,6 @@ a.story-url:focus-visible {
 }
 
 /* ---- Plain HTML / no-JS reader ---- */
-.plain-page .app {
-  /* Same shell as SPA */
-}
-
 .plain-banner {
   margin: 0 0 14px;
   font-size: 0.76rem;

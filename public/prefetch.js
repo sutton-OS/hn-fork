@@ -12,7 +12,14 @@
           return null;
         }
         const data = await response.json();
-        return Array.isArray(data) ? data : null;
+        // Support structured { stories } and legacy array payloads.
+        if (Array.isArray(data)) {
+          return data;
+        }
+        if (data && typeof data === "object" && Array.isArray(data.stories)) {
+          return data;
+        }
+        return null;
       })
       .catch(() => null),
   };

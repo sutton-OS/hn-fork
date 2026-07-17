@@ -1,0 +1,12 @@
+{
+  "name": "hnx",
+  "private": true,
+  "description": "Privacy-first Hacker News reader",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check lib/hn.js && node --check lib/html.js && node --check api/stories.js && node --check api/item.js && node --check api/thread.js && node --check api/html/feed.js && node --check api/html/item.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

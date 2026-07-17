@@ -3,12 +3,14 @@ const {
   getQueryString,
   parsePositiveInt,
   parseNonNegativeInt,
+  normalizeFeed,
+  feedPath,
   normalizeListItem,
   fetchJSON,
   mapWithConcurrency,
+  UPSTREAM,
 } = require("../../lib/hn");
 const {
-  normalizeFeed,
   normalizeTheme,
   plainFeedPath,
   renderFeedPicker,
@@ -19,11 +21,6 @@ const {
   escapeHTML,
 } = require("../../lib/html");
 
-const FEEDS = { best: "beststories", top: "topstories", new: "newstories" };
-const MAX_CONCURRENCY = 40;
-const DEFAULT_PAGE_SIZE = 30;
-const MAX_PAGE_SIZE = 60;
-const TIMEOUT_MS = 10000;
 const UA = "hnx-html-feed/1.0";
 
 module.exports = async function handler(req, res) {
@@ -45,18 +42,18 @@ module.exports = async function handler(req, res) {
   const theme = normalizeTheme(getQueryString(req.query?.theme));
   const offset = parseNonNegativeInt(getQueryString(req.query?.offset), 0);
   const limit = Math.min(
-    parsePositiveInt(getQueryString(req.query?.limit), DEFAULT_PAGE_SIZE),
-    MAX_PAGE_SIZE,
+    parsePositiveInt(getQueryString(req.query?.limit), UPSTREAM.storiesDefaultLimit),
+    UPSTREAM.storiesMaxLimit,
   );
 
   const currentPath =
     offset > 0 ? `/plain/${feed}?offset=${offset}` : `/plain/${feed}`;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), UPSTREAM.timeoutMs);
 
   try {
-    const ids = await fetchJSON(`${HN_BASE_URL}/${FEEDS[feed]}.json`, {
+    const ids = await fetchJSON(`${HN_BASE_URL}/${feedPath(feed)}.json`, {
       signal: controller.signal,
       userAgent: UA,
     });
@@ -69,9 +66,11 @@ module.exports = async function handler(req, res) {
       .map((id) => Number(id))
       .filter((id) => Number.isInteger(id) && id > 0);
     const pageIds = normalizedIds.slice(offset, offset + limit);
+    const nextOffset = offset + pageIds.length;
+    const hasMore = nextOffset < normalizedIds.length;
 
     const results = pageIds.length
-      ? await mapWithConcurrency(pageIds, MAX_CONCURRENCY, (id) =>
+      ? await mapWithConcurrency(pageIds, UPSTREAM.concurrency, (id) =>
           fetchJSON(`${HN_BASE_URL}/item/${id}.json`, {
             signal: controller.signal,
             userAgent: UA,
@@ -80,8 +79,6 @@ module.exports = async function handler(req, res) {
       : [];
 
     const stories = results.map((item) => normalizeListItem(item)).filter(Boolean);
-    const nextOffset = offset + pageIds.length;
-    const hasMore = nextOffset < normalizedIds.length;
 
     const listHtml = stories.length
       ? stories.map((story) => storyListArticle(story, theme)).join("")
@@ -107,8 +104,7 @@ module.exports = async function handler(req, res) {
         </header>
         <p class="plain-banner status">
           Plain HTML mode (no JavaScript).
-          <a href="/">Full app</a> ·
-          <a href="${escapeHTML(plainFeedPath(feed, theme))}">Best/Top/New</a>
+          <a href="/">Full app</a>
         </p>
         <section class="story-list">
           ${listHtml}

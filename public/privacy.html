@@ -11,8 +11,8 @@
     />
     <title>Privacy — HNx</title>
     <link rel="icon" type="image/png" href="/favicon.png?v=2" />
-    <script src="./theme-init.js?v=30"></script>
-    <link rel="stylesheet" href="./styles.css?v=30" />
+    <script src="./theme-init.js?v=31"></script>
+    <link rel="stylesheet" href="./styles.css?v=31" />
   </head>
   <body class="privacy-page">
     <main class="privacy-shell">
@@ -139,8 +139,12 @@
         <ul>
           <li>Content-Security-Policy locked to first-party assets and APIs</li>
           <li>Strict-Transport-Security, frame denial, nosniff, Permissions-Policy</li>
-          <li>HTML from HN sanitized with a vendored DOMPurify build before render</li>
+          <li>
+            Full app: HN HTML sanitized with vendored DOMPurify before render.
+            Plain HTML reader: server-side allowlist sanitizer (http(s) links only).
+          </li>
           <li>No open URL-fetch proxy endpoints</li>
+          <li>No service worker / offline cache (avoids stale or opaque client storage)</li>
         </ul>
 
         <h2>Source</h2>
@@ -152,6 +156,6 @@
         <p class="privacy-updated">Last updated: 2026-07-17</p>
       </article>
     </main>
-    <script src="./privacy.js?v=30" defer></script>
+    <script src="./privacy.js?v=31" defer></script>
   </body>
 </html>
