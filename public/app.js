@@ -1293,12 +1293,19 @@ function renderStoryDetail(story) {
   const storyText = normalized.text ? sanitizeHNHTML(normalized.text) : "";
   const byline = normalized.by ? escapeHTML(normalized.by) : "";
 
+  const urlLabel = safeUrl || "";
   return `
     <article class="story story-detail">
       <div class="story-title">
         ${safeUrl ? `<a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}
-        ${domain ? `<span class="domain">(${escapeHTML(domain)})</span>` : ""}
       </div>
+      ${
+        urlLabel
+          ? `<a class="story-url" href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHTML(urlLabel)}</a>`
+          : domain
+            ? `<span class="story-url">${escapeHTML(domain)}</span>`
+            : ""
+      }
       <div class="story-meta">
         ${byline ? `<span class="meta-user">${byline}</span>` : ""}
         <span class="meta-time">${timeAgo(normalized.time)} ago</span>

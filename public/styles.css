@@ -489,6 +489,27 @@ html[data-theme="dark"] .app {
   font-size: 0.76rem;
 }
 
+/* Story page: full article URL — gold accent, matches comment body size. */
+.story-url {
+  display: block;
+  margin-top: 8px;
+  color: #b5843a;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-decoration: none;
+}
+
+a.story-url:hover,
+a.story-url:focus-visible {
+  color: #b5843a;
+  text-decoration: underline;
+  text-decoration-color: rgba(181, 132, 58, 0.55);
+  outline: none;
+}
+
 .story-meta {
   display: flex;
   flex-wrap: wrap;
