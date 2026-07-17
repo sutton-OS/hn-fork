@@ -187,6 +187,8 @@ iframe {
 .app {
   width: min(50vw, var(--page-max));
   margin: 12px auto 24px;
+  /* Room so the fixed privacy control does not cover the last content. */
+  margin-bottom: 4.5rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
@@ -663,7 +665,8 @@ html[data-theme="dark"] .app {
   .theme-toggle,
   .theme-toggle::after,
   .feed-option,
-  .comment-chevron {
+  .comment-chevron,
+  .privacy-fab {
     transition: none !important;
   }
 }
@@ -741,15 +744,40 @@ html[data-theme="dark"] .app {
   color: var(--subtle);
 }
 
-.privacy-link {
+/* Fixed corner control — outside #app so SPA route swaps never remove it. */
+.privacy-fab {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--floating-panel);
   color: var(--muted);
-  text-decoration: none;
+  font-family: var(--font-mono);
   font-size: 0.74rem;
   letter-spacing: 0.04em;
+  text-decoration: none;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: color var(--theme-transition-duration) var(--theme-transition-ease),
+    border-color var(--theme-transition-duration) var(--theme-transition-ease),
+    background-color var(--theme-transition-duration) var(--theme-transition-ease);
 }
 
-.privacy-link:hover,
-.privacy-link:focus-visible {
+.privacy-fab:hover,
+.privacy-fab:focus-visible {
   color: var(--text);
-  text-decoration: underline;
+  border-color: var(--text);
+  outline: none;
+}
+
+.privacy-fab:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }

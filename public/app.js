@@ -748,7 +748,6 @@ function topbar(content) {
         <div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
           ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
         </div>
-        <a class="privacy-link" href="/privacy.html">Privacy</a>
         <button
           class="theme-toggle"
           type="button"
