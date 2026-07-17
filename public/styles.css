@@ -25,7 +25,7 @@
   --font-mono: "Berkeley Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", monospace;
   /* OP self-text on story/comments page (Ask HN, Show HN, etc.) */
-  --op-text: #4d7a5c;
+  --op-text: #3f6a4e;
   --page-max: 1420px;
   --content-max: 72ch;
   --radius-lg: 24px;
@@ -90,7 +90,7 @@ html[data-theme="dark"] {
   --toggle-knob: #f0ede6;
   /* No drop shadow in dark mode — soft black-on-black shadows posterize/band. */
   --shadow: none;
-  --op-text: #8fad96;
+  --op-text: #7a9b82;
 }
 
 *,
