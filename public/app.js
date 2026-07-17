@@ -836,11 +836,13 @@ function timeAgo(unixSeconds) {
 }
 
 function topbar(content) {
-  const rightContent = content ?? "";
+  const leftContent = (content ?? "").trim();
   return `
     <header class="topbar">
+      <div class="topbar-start">
+        ${leftContent || ""}
+      </div>
       <div class="topbar-actions">
-        ${rightContent}
         <div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
           ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
         </div>

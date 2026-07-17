@@ -210,11 +210,24 @@ html[data-theme="dark"] .app {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 18px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
+}
+
+.topbar-start {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.topbar-start:empty {
+  display: none;
 }
 
 .topbar-actions {
@@ -223,6 +236,7 @@ html[data-theme="dark"] .app {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .theme-toggle {
@@ -720,10 +734,17 @@ html[data-theme="dark"] .app {
   .topbar {
     align-items: stretch;
     flex-direction: column;
+    gap: 10px;
+  }
+
+  .topbar-start {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .topbar-actions {
     width: 100%;
+    margin-left: 0;
     justify-content: flex-end;
   }
 
