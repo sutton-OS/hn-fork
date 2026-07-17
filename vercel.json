@@ -1,4 +1,18 @@
 {
+  "rewrites": [
+    {
+      "source": "/plain",
+      "destination": "/api/html/feed?feed=best"
+    },
+    {
+      "source": "/plain/item/:id",
+      "destination": "/api/html/item?id=:id"
+    },
+    {
+      "source": "/plain/:feed",
+      "destination": "/api/html/feed?feed=:feed"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

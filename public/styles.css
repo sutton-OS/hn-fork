@@ -914,6 +914,101 @@ a.story-url:focus-visible {
   color: var(--subtle);
 }
 
+/* ---- Plain HTML / no-JS reader ---- */
+.plain-page .app {
+  /* Same shell as SPA */
+}
+
+.plain-banner {
+  margin: 0 0 14px;
+  font-size: 0.76rem;
+}
+
+.plain-banner a {
+  color: var(--muted);
+}
+
+.plain-banner a:hover {
+  color: var(--text);
+}
+
+.plain-more {
+  margin: 16px 0 0;
+}
+
+.plain-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.plain-theme-link {
+  color: var(--muted);
+  text-decoration: none;
+  opacity: 0.65;
+}
+
+.plain-theme-link.is-active,
+.plain-theme-link:hover,
+.plain-theme-link:focus-visible {
+  color: var(--text);
+  opacity: 1;
+  outline: none;
+}
+
+.plain-theme-sep {
+  color: var(--subtle);
+  opacity: 0.5;
+}
+
+a.comment-replies-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.noscript-fallback {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.noscript-card {
+  width: min(100%, 28rem);
+  padding: 1.5rem 1.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.noscript-card h1 {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-title);
+  font-size: 1.35rem;
+  font-weight: 400;
+}
+
+.noscript-card p {
+  margin: 0 0 0.85rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.noscript-meta {
+  margin-top: 1rem !important;
+  font-size: 0.76rem;
+}
+
 /* Fixed corner control — outside #app so SPA route swaps never remove it. */
 .privacy-fab {
   position: fixed;

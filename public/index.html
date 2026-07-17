@@ -18,14 +18,32 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
     <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon.png?v=2" />
     <link rel="manifest" href="/site.webmanifest?v=2" />
-    <script src="./theme-init.js?v=29"></script>
-    <link rel="stylesheet" href="./styles.css?v=29" />
-    <link rel="modulepreload" href="./vendor/dompurify.es.mjs?v=29" />
-    <link rel="modulepreload" href="./app.js?v=29" />
-    <script src="./prefetch.js?v=29" defer></script>
-    <script src="./app.js?v=29" type="module"></script>
+    <script src="./theme-init.js?v=30"></script>
+    <link rel="stylesheet" href="./styles.css?v=30" />
+    <link rel="modulepreload" href="./vendor/dompurify.es.mjs?v=30" />
+    <link rel="modulepreload" href="./app.js?v=30" />
+    <script src="./prefetch.js?v=30" defer></script>
+    <script src="./app.js?v=30" type="module"></script>
   </head>
   <body>
+    <noscript>
+      <meta http-equiv="refresh" content="0; url=/plain" />
+      <div class="noscript-fallback">
+        <div class="noscript-card">
+          <h1>HNx</h1>
+          <p>
+            JavaScript is disabled. HNx includes a full plain-HTML reader that works
+            without scripts.
+          </p>
+          <p>
+            <a class="btn" href="/plain">Continue to plain HTML reader</a>
+          </p>
+          <p class="noscript-meta">
+            <a href="/privacy.html">Privacy</a>
+          </p>
+        </div>
+      </div>
+    </noscript>
     <main id="app" class="app" aria-live="polite"></main>
     <a class="privacy-fab" href="/privacy.html">Privacy</a>
   </body>

@@ -11,8 +11,8 @@
     />
     <title>Privacy — HNx</title>
     <link rel="icon" type="image/png" href="/favicon.png?v=2" />
-    <script src="./theme-init.js?v=29"></script>
-    <link rel="stylesheet" href="./styles.css?v=29" />
+    <script src="./theme-init.js?v=30"></script>
+    <link rel="stylesheet" href="./styles.css?v=30" />
   </head>
   <body class="privacy-page">
     <main class="privacy-shell">
@@ -48,10 +48,18 @@
           </li>
         </ul>
 
+        <h2>No JavaScript</h2>
+        <p>
+          If scripts are disabled, use the
+          <a href="/plain">plain HTML reader</a>
+          (<code>/plain</code>). It is server-rendered first-party HTML and CSS only —
+          same privacy posture, no client-side JS required.
+        </p>
+
         <h2>What your browser talks to</h2>
         <p>
           For story and comment data, the page only requests this site’s own origin
-          (<code>/api/*</code>). There is no client-side call to Google Fonts, Firebase,
+          (<code>/api/*</code> or plain HTML routes). There is no client-side call to Google Fonts, Firebase,
           Algolia, or other third-party APIs from the browser under normal use.
         </p>
         <p>
@@ -144,6 +152,6 @@
         <p class="privacy-updated">Last updated: 2026-07-17</p>
       </article>
     </main>
-    <script src="./privacy.js?v=29" defer></script>
+    <script src="./privacy.js?v=30" defer></script>
   </body>
 </html>

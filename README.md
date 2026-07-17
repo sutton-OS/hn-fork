@@ -11,13 +11,26 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - **Strict security headers** (CSP, HSTS, Referrer-Policy, Permissions-Policy, COOP/CORP)
 - **No open URL-fetch proxy**
 - **Theme** uses tab `sessionStorage` only (so the privacy page matches light/dark)
+- **No-JS**: plain HTML reader at [`/plain`](https://hn-fork.vercel.app/plain) (server-rendered)
 - See [`public/privacy.html`](public/privacy.html) for the user-facing policy
 
 ## Structure
 
 - `public/` — static UI (`index.html`, `app.js`, `styles.css`, vendored libs, fonts)
-- `api/` — Vercel serverless endpoints (`stories`, `item`, `thread`)
+- `api/` — Vercel serverless endpoints (`stories`, `item`, `thread`, `html/*`)
 - `lib/hn.js` — shared HN fetch/normalize helpers for API routes
+- `lib/html.js` — HTML escape/sanitize + plain-reader layout helpers
+
+## Plain HTML (no JavaScript)
+
+```
+/plain              → best feed
+/plain/top          → top feed
+/plain/new          → new feed
+/plain/item/:id     → story or comment + paged replies
+```
+
+Theme without JS: `?theme=light` or `?theme=dark` (linked in the top bar).
 
 ## Run locally
 
