@@ -12,10 +12,15 @@ const {
 } = require("../../lib/hn");
 const {
   normalizeTheme,
+  normalizeSkin,
   plainFeedPath,
+  classicFeedPath,
   renderFeedPicker,
   renderThemeLinks,
   renderLayout,
+  renderClassicLayout,
+  renderClassicNav,
+  classicStoryListItem,
   sendHTML,
   storyListArticle,
   escapeHTML,
@@ -39,6 +44,8 @@ module.exports = async function handler(req, res) {
   }
 
   const feed = normalizeFeed(getQueryString(req.query?.feed));
+  const skin = normalizeSkin(getQueryString(req.query?.skin));
+  const isClassic = skin === "classic";
   const theme = normalizeTheme(getQueryString(req.query?.theme));
   const offset = parseNonNegativeInt(getQueryString(req.query?.offset), 0);
   const limit = Math.min(
@@ -46,8 +53,13 @@ module.exports = async function handler(req, res) {
     UPSTREAM.storiesMaxLimit,
   );
 
-  const currentPath =
-    offset > 0 ? `/plain/${feed}?offset=${offset}` : `/plain/${feed}`;
+  const currentPath = isClassic
+    ? offset > 0
+      ? `/classic/${feed}?offset=${offset}`
+      : `/classic/${feed}`
+    : offset > 0
+      ? `/plain/${feed}?offset=${offset}`
+      : `/plain/${feed}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM.timeoutMs);
@@ -80,6 +92,38 @@ module.exports = async function handler(req, res) {
 
     const stories = results.map((item) => normalizeListItem(item)).filter(Boolean);
 
+    if (isClassic) {
+      const listHtml = stories.length
+        ? `<ol start="${offset + 1}">\n${stories
+            .map((story) => classicStoryListItem(story))
+            .join("\n")}\n</ol>`
+        : `<p>No stories on this page.</p>`;
+
+      const moreHtml = hasMore
+        ? `<p><a href="${escapeHTML(
+            classicFeedPath(feed, { offset: nextOffset }),
+          )}">More...</a></p>`
+        : "";
+
+      const body = `
+${renderClassicNav(feed)}
+${listHtml}
+${moreHtml}
+<hr>
+<p><small>Classic HTML mode (no JavaScript). Double-tap <b>H</b> in the modern app to open this view.</small></p>
+`;
+
+      sendHTML(
+        res,
+        200,
+        renderClassicLayout({
+          title: `HNx — ${feed}`,
+          body,
+        }),
+      );
+      return;
+    }
+
     const listHtml = stories.length
       ? stories.map((story) => storyListArticle(story, theme)).join("")
       : `<p class="status">No stories on this page.</p>`;
@@ -105,6 +149,8 @@ module.exports = async function handler(req, res) {
         <p class="plain-banner status">
           Plain HTML mode (no JavaScript).
           <a href="/">Full app</a>
+          ·
+          <a href="${escapeHTML(classicFeedPath(feed))}">Classic</a>
         </p>
         <section class="story-list">
           ${listHtml}
@@ -127,9 +173,27 @@ module.exports = async function handler(req, res) {
       error?.name === "AbortError"
         ? "Request timed out."
         : error?.message || "Failed to load feed.";
+    const status = error?.name === "AbortError" ? 504 : 502;
+
+    if (isClassic) {
+      sendHTML(
+        res,
+        status,
+        renderClassicLayout({
+          title: "Error — HNx",
+          body: `
+${renderClassicNav(feed)}
+<p>${escapeHTML(message)}</p>
+<p><a href="${escapeHTML(classicFeedPath(feed))}">Retry</a></p>
+`,
+        }),
+      );
+      return;
+    }
+
     sendHTML(
       res,
-      error?.name === "AbortError" ? 504 : 502,
+      status,
       renderLayout({
         title: "Error — HNx",
         theme,

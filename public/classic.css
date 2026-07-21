@@ -1,0 +1,94 @@
+/*
+ * Classic / 90s skin for HNx.
+ * Browser-default look: blue links, Times-ish text, no chrome.
+ */
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 8px;
+  background: #ffffff;
+  color: #000000;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+a:link {
+  color: #0000ee;
+}
+
+a:visited {
+  color: #551a8b;
+}
+
+a:active {
+  color: #ff0000;
+}
+
+h1 {
+  font-size: 1.35em;
+  font-weight: bold;
+  margin: 0.4em 0;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid #808080;
+  margin: 0.75em 0;
+}
+
+ol {
+  margin: 0.5em 0 0.5em 1.6em;
+  padding: 0;
+}
+
+li {
+  margin: 0.55em 0;
+}
+
+small,
+.cm {
+  color: #333333;
+  font-size: 0.85em;
+}
+
+.c {
+  margin: 0.85em 0 0.85em 0;
+  padding-left: 0;
+  border-left: none;
+}
+
+.cm {
+  margin: 0 0 0.2em;
+}
+
+.ct {
+  margin: 0 0 0 0.5em;
+}
+
+.ct p {
+  margin: 0.35em 0;
+}
+
+.ct pre {
+  white-space: pre-wrap;
+  overflow-x: auto;
+  background: #f0f0f0;
+  padding: 0.35em 0.5em;
+  font-size: 0.9em;
+}
+
+.op {
+  margin: 0.6em 0;
+}
+
+.op p {
+  margin: 0.35em 0;
+}
+
+p {
+  margin: 0.5em 0;
+}

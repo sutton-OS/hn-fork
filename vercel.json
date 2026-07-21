@@ -11,6 +11,18 @@
     {
       "source": "/plain/:feed",
       "destination": "/api/html/feed?feed=:feed"
+    },
+    {
+      "source": "/classic",
+      "destination": "/api/html/feed?feed=best&skin=classic"
+    },
+    {
+      "source": "/classic/item/:id",
+      "destination": "/api/html/item?id=:id&skin=classic"
+    },
+    {
+      "source": "/classic/:feed",
+      "destination": "/api/html/feed?feed=:feed&skin=classic"
     }
   ],
   "headers": [
@@ -75,6 +87,15 @@
     },
     {
       "source": "/styles.css",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/classic.css",
       "headers": [
         {
           "key": "Cache-Control",

@@ -12,6 +12,10 @@ const {
   getSafeUrl,
   escapeHTML,
   withTheme,
+  normalizeSkin,
+  classicFeedPath,
+  classicItemPath,
+  classicStoryListItem,
 } = require("../lib/html");
 
 describe("normalizeFeed", () => {
@@ -80,6 +84,32 @@ describe("getSafeUrl", () => {
 describe("withTheme", () => {
   it("appends theme query", () => {
     assert.equal(withTheme("/plain/best", "light"), "/plain/best?theme=light");
+  });
+});
+
+describe("classic skin", () => {
+  it("normalizes skin", () => {
+    assert.equal(normalizeSkin("classic"), "classic");
+    assert.equal(normalizeSkin("plain"), "plain");
+    assert.equal(normalizeSkin(""), "plain");
+  });
+  it("builds classic paths without theme", () => {
+    assert.equal(classicFeedPath("best"), "/classic/best");
+    assert.equal(classicFeedPath("top", { offset: 30 }), "/classic/top?offset=30");
+    assert.equal(classicItemPath(42), "/classic/item/42");
+    assert.equal(classicItemPath(42, { offset: 40 }), "/classic/item/42?offset=40");
+  });
+  it("renders a bare list item with blue-link-friendly markup", () => {
+    const html = classicStoryListItem({
+      id: 1,
+      title: "Hello",
+      url: "https://example.com",
+      domain: "example.com",
+      time: Math.floor(Date.now() / 1000) - 120,
+    });
+    assert.match(html, /href="https:\/\/example\.com\/?"/);
+    assert.match(html, /href="\/classic\/item\/1"/);
+    assert.match(html, /comments/);
   });
 });
 

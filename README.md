@@ -12,6 +12,7 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - **No open URL-fetch proxy**
 - **Theme** uses tab `sessionStorage` only (so the privacy page matches light/dark)
 - **No-JS**: plain HTML reader at [`/plain`](https://hn-fork.vercel.app/plain) (server-rendered)
+- **Classic 90s skin**: bare HTML blue-links mode at [`/classic`](https://hn-fork.vercel.app/classic) (double-tap `H` from the modern app)
 - See [`public/privacy.html`](public/privacy.html) for the user-facing policy
 
 ## Structure
@@ -31,6 +32,19 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 ```
 
 Theme without JS: `?theme=light` or `?theme=dark` (linked in the top bar).
+
+## Classic HTML (90s skin)
+
+Bare-bones reader: browser defaults, blue links, no panels or custom fonts.
+
+```
+/classic            → best feed
+/classic/top        → top feed
+/classic/new        → new feed
+/classic/item/:id   → story or comment + paged replies
+```
+
+From the modern app, **double-tap `H`** jumps to the matching classic page (feed or current item).
 
 ## Run locally
 
@@ -59,6 +73,10 @@ Deploy on Vercel. Static files live in `public/`, and serverless endpoints live 
 
 ## Keyboard
 
+**Anywhere (modern app)**
+
+- Double-tap `H` — open classic 90s HTML skin for the current feed/item
+
 **List view**
 
 - `j` / `k` or arrows — move selection
@@ -70,5 +88,5 @@ Deploy on Vercel. Static files live in `public/`, and serverless endpoints live 
 
 - `j` / `k` or arrows — move comment selection
 - `Enter` — expand replies on selected comment
-- `h` — collapse / expand selected comment
+- `h` — collapse / expand selected comment (single tap; double-tap opens classic)
 - `g` / `G` — first / last visible comment

@@ -56,8 +56,66 @@ applyTheme(readStoredTheme());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("pageshow", handlePageShow);
 document.addEventListener("visibilitychange", handleVisibilityChange);
+// Capture-phase so double-tap H can intercept before story single-H collapse.
+document.addEventListener("keydown", handleClassicSkinShortcut, true);
 // Don't wait for window "load" (fonts/images) — modules already run after DOM parse.
 void handleRouteChange();
+
+/** ms window for double-tap H → classic 90s HTML skin. */
+const DOUBLE_H_MS = 320;
+let hTapTimer = null;
+let hTapPending = false;
+
+function classicSkinUrl() {
+  const route = parseRoute();
+  if (route.type === "story" && route.id) {
+    return `/classic/item/${route.id}`;
+  }
+  const feed = normalizeFeed(currentFeed);
+  return feed === FEED_BEST ? "/classic" : `/classic/${feed}`;
+}
+
+/**
+ * Double-tap H opens the classic (90s) HTML skin.
+ * Single H still collapses comments on story view after a short delay.
+ */
+function handleClassicSkinShortcut(event) {
+  if (event.defaultPrevented) {
+    return;
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return;
+  }
+  if (event.key !== "h" && event.key !== "H") {
+    return;
+  }
+  if (isEditableTarget(event.target)) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (hTapPending) {
+    hTapPending = false;
+    if (hTapTimer) {
+      clearTimeout(hTapTimer);
+      hTapTimer = null;
+    }
+    window.location.href = classicSkinUrl();
+    return;
+  }
+
+  hTapPending = true;
+  hTapTimer = setTimeout(() => {
+    hTapPending = false;
+    hTapTimer = null;
+    // Single H: collapse/expand selected comment in story view only.
+    if (app.dataset.view === "story") {
+      toggleSelectedComment();
+    }
+  }, DOUBLE_H_MS);
+}
 
 function handlePageShow(event) {
   if (event.persisted) {
@@ -1990,11 +2048,7 @@ function handleStoryKeyboardNavigation(event) {
     activateSelectedCommentReplies();
     return;
   }
-  if (event.key === "h" || event.key === "H") {
-    event.preventDefault();
-    toggleSelectedComment();
-    return;
-  }
+  // Single/double H is handled by handleClassicSkinShortcut (capture phase).
   if (event.key === "g" && !event.shiftKey) {
     event.preventDefault();
     selectCommentIndex(0);
