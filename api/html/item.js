@@ -335,5 +335,6 @@ ${renderClassicNav("best")}
     );
   } finally {
     clearTimeout(timer);
+    controller.abort();
   }
 };

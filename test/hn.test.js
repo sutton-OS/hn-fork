@@ -26,6 +26,10 @@ describe("normalizeFeed", () => {
   });
   it("defaults unknown feeds", () => {
     assert.equal(normalizeFeed("nope"), "best");
+    for (const value of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      assert.equal(normalizeFeed(value), "best");
+      assert.equal(feedPath(value), "beststories");
+    }
   });
 });
 
@@ -65,6 +69,31 @@ describe("sanitizeHNHTML", () => {
   it("drops javascript urls", () => {
     const out = sanitizeHNHTML('<a href="javascript:alert(1)">x</a>');
     assert.doesNotMatch(out, /javascript:/i);
+  });
+  it("discards incomplete tags before surrounding markup is appended", () => {
+    for (const input of [
+      '<img src=/api/stories?limit=60 ',
+      '<a href="javascript:alert(1)" ',
+      '<script src="/app.js"',
+    ]) {
+      assert.equal(sanitizeHNHTML(input), "");
+    }
+  });
+  it("removes active content and attributes while preserving readable text", () => {
+    const out = sanitizeHNHTML('<p onclick="alert(1)" style="color:red">hello<img src="/api/item?id=1"><svg><a href="javascript:alert(1)">bad</a></svg></p>');
+    assert.match(out, /hello/);
+    assert.doesNotMatch(out, /onclick|style=|<img|<svg|javascript:/i);
+  });
+  it("normalizes entity-encoded URLs and strips dangerous or relative links", () => {
+    const out = sanitizeHNHTML('<a href="https:&#47;&#47;example.com/?a=1&amp;b=2" onclick="bad()">safe</a>');
+    assert.match(out, /href="https:\/\/example.com\/\?a=1&amp;b=2"/);
+    assert.match(out, /rel="noopener noreferrer"/);
+    for (const url of ["jav&#x61;script:alert(1)", "data:text/html,bad", "//evil.example", "/api/stories"]) {
+      assert.doesNotMatch(sanitizeHNHTML(`<a href="${url}">text</a>`), /href=/);
+    }
+  });
+  it("preserves paragraphs, lists, and code and safely escapes literal markup", () => {
+    assert.equal(sanitizeHNHTML('<p>A &amp; B</p><pre><code>&lt;img&gt;</code></pre><ul><li>one</li></ul>'), '<p>A &amp; B</p><pre><code>&lt;img&gt;</code></pre><ul><li>one</li></ul>');
   });
 });
 

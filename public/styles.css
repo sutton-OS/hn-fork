@@ -1,3 +1,5 @@
+[hidden] { display: none !important; }
+
 :root {
   --bg: #ffffff;
   --panel: #ffffff;
@@ -621,11 +623,28 @@ a.story-url:focus-visible {
 }
 
 .comment {
-  --comment-depth: 0;
-  margin-left: clamp(0px, calc(var(--comment-depth) * 14px), 84px);
-  padding: 10px 12px 12px 14px;
+  min-width: 0;
+  margin-left: 0;
+  padding: 10px 0 12px;
   border-left: 2px solid var(--line);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.comment.is-indented {
+  /* 12px + the parent's 2px border = one 14px step. */
+  margin-left: 12px;
+}
+
+.comment > .comment-header,
+.comment > .comment-text,
+.comment > .comment-show-more {
+  margin-left: 14px;
+  margin-right: 12px;
+}
+
+/* Borders must not accumulate after the visual depth cap. */
+.comment[data-depth]:not([data-depth="0"]):not(.is-indented) {
+  border-left: 0;
 }
 
 .comment.is-selected {

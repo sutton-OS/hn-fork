@@ -61,7 +61,7 @@ module.exports = async function handler(req, res) {
           fetchJSON(`${HN_BASE_URL}/item/${id}.json`, {
             signal: controller.signal,
             userAgent: UA,
-          }).catch(() => null),
+          }),
       );
       stories = results.map((item) => normalizeListItem(item)).filter(Boolean);
     }
@@ -87,5 +87,6 @@ module.exports = async function handler(req, res) {
     });
   } finally {
     clearTimeout(timer);
+    controller.abort();
   }
 };

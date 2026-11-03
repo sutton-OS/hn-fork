@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" style="color-scheme: dark">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,8 +11,8 @@
     />
     <title>Privacy — HNx</title>
     <link rel="icon" type="image/png" href="/favicon.png?v=2" />
-    <script src="./theme-init.js?v=32"></script>
-    <link rel="stylesheet" href="./styles.css?v=32" />
+    <script src="./theme-init.js?v=34"></script>
+    <link rel="stylesheet" href="./styles.css?v=34" />
   </head>
   <body class="privacy-page">
     <main class="privacy-shell">
@@ -148,7 +148,7 @@
           <li>Strict-Transport-Security, frame denial, nosniff, Permissions-Policy</li>
           <li>
             Full app: HN HTML sanitized with vendored DOMPurify before render.
-            Plain HTML reader: server-side allowlist sanitizer (http(s) links only).
+            Plain HTML reader: parser-based server-side allowlist sanitizer (http(s) links only).
           </li>
           <li>No open URL-fetch proxy endpoints</li>
           <li>No service worker / offline cache (avoids stale or opaque client storage)</li>
@@ -160,9 +160,9 @@
           stricter, that is a welcome bug report.
         </p>
 
-        <p class="privacy-updated">Last updated: 2026-07-17</p>
+        <p class="privacy-updated">Last updated: 2026-11-03</p>
       </article>
     </main>
-    <script src="./privacy.js?v=32" defer></script>
+    <script src="./privacy.js?v=34" defer></script>
   </body>
 </html>

@@ -1,0 +1,6 @@
+test/
+test-results/
+playwright-report/
+.github/
+.vscode/
+playwright.config.cjs

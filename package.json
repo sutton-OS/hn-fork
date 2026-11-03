@@ -4,9 +4,19 @@
   "description": "Privacy-first Hacker News reader",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check lib/hn.js && node --check lib/html.js && node --check api/stories.js && node --check api/item.js && node --check api/thread.js && node --check api/html/feed.js && node --check api/html/item.js && node --check public/app.js"
+    "check": "node scripts/check.cjs",
+    "vendor:sync": "node scripts/vendor.cjs",
+    "test:browser": "playwright test",
+    "verify": "npm run check && npm test && npm run test:browser"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "sanitize-html": "2.18.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "dompurify": "3.4.17"
   }
 }

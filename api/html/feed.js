@@ -86,7 +86,7 @@ module.exports = async function handler(req, res) {
           fetchJSON(`${HN_BASE_URL}/item/${id}.json`, {
             signal: controller.signal,
             userAgent: UA,
-          }).catch(() => null),
+          }),
         )
       : [];
 
@@ -213,5 +213,6 @@ ${renderClassicNav(feed)}
     );
   } finally {
     clearTimeout(timer);
+    controller.abort();
   }
 };

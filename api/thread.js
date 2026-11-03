@@ -60,5 +60,6 @@ module.exports = async function handler(req, res) {
     });
   } finally {
     clearTimeout(timer);
+    controller.abort();
   }
 };
