@@ -1,5 +1,6 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const {
   normalizeFeed,
   feedPath,
@@ -53,6 +54,13 @@ describe("leanComment", () => {
 });
 
 describe("sanitizeHNHTML", () => {
+  it("loads in a serverless CommonJS runtime without require(ESM) support", () => {
+    const output = execFileSync(process.execPath, [
+      "--no-experimental-require-module", "-e",
+      'process.stdout.write(require("./lib/html").sanitizeHNHTML("<p>safe</p><img src=x>"))',
+    ], { cwd: require("node:path").resolve(__dirname, ".."), encoding: "utf8" });
+    assert.equal(output, "<p>safe</p>");
+  });
   it("keeps safe links and strips scripts", () => {
     const out = sanitizeHNHTML(
       '<p>x<script>alert(1)</script><a href="https://example.com">ok</a></p>',

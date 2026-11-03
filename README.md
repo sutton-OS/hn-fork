@@ -50,6 +50,8 @@ From the modern app, **double-tap `H`** jumps to the matching classic page (feed
 
 ## Run locally
 
+Use Node 24 (the pinned production runtime).
+
 Use Vercel dev when you need the API routes:
 
 ```sh
@@ -78,7 +80,7 @@ Browser tests exercise the real API handlers and configured security headers. Th
 
 ## Dependency updates
 
-Dependencies are pinned in `package.json` and `package-lock.json`; Dependabot checks npm packages weekly. DOMPurify runs in the browser from a self-hosted, versioned file. After updating it, update its filename references in `public/modules/sanitize.js` and `public/index.html`, then run `npm run vendor:sync` and `npm run verify`. Remove the previous vendored distribution when switching versions. `npm run check` rejects a vendored distribution or license that differs from the locked package.
+Dependencies are pinned in `package.json` and `package-lock.json`; Dependabot checks npm packages weekly. DOMPurify runs in the browser from a self-hosted, versioned file. After updating it, update its filename references in `public/modules/sanitize.js` and `public/index.html`, then run `npm run vendor:sync` and `npm run verify`. Remove the previous vendored distribution when switching versions. The same command creates a CommonJS server sanitizer bundle in `lib/vendor/`, including license notices, because Vercel cannot load its ESM parser through CommonJS. Run it after any sanitizer or transitive dependency update. `npm run check` rejects any vendored distribution, license, or server sanitizer bundle that differs from the locked packages.
 
 ## Data loading
 
