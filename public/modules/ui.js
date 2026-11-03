@@ -25,7 +25,7 @@ export function createUI({ app, getCurrentFeed, setFeed }) {
     document.documentElement.style.colorScheme = nextTheme;
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", nextTheme === "dark" ? "#000000" : "#ffffff");
+      ?.setAttribute("content", nextTheme === "dark" ? "#181715" : "#ffffff");
     try {
       sessionStorage.setItem(THEME_STORAGE_KEY, nextTheme);
     } catch {
