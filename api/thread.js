@@ -31,6 +31,14 @@ module.exports = async function handler(req, res) {
   );
 
   const controller = new AbortController();
+  const stream = req.query?.stream === "1";
+  let disconnected = false;
+  const stop = () => {
+    disconnected = true;
+    controller.abort();
+  };
+  req.on("error", stop);
+  res.once("close", stop);
   const timer = setTimeout(() => {
     controller.abort();
   }, UPSTREAM.threadTimeoutMs);
@@ -41,6 +49,12 @@ module.exports = async function handler(req, res) {
       limit,
       signal: controller.signal,
       userAgent: UA,
+      onParent: stream ? (parent) => {
+        res.status(200);
+        res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+        res.setHeader("cache-control", "no-store");
+        res.write(JSON.stringify({ parent }) + "\n");
+      } : undefined,
     });
 
     if (!payload) {
@@ -48,18 +62,28 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    sendJSON(res, 200, payload);
+    if (stream) {
+      const { comments, nextOffset, total, hasMore } = payload;
+      res.end(JSON.stringify({ thread: { comments, nextOffset, total, hasMore } }) + "\n");
+    } else {
+      sendJSON(res, 200, payload);
+    }
   } catch (error) {
-    if (error?.name === "AbortError") {
-      sendJSON(res, 504, { error: "Thread request timed out." });
+    if (disconnected || res.destroyed) {
+      if (!res.destroyed) res.end();
       return;
     }
-
-    sendJSON(res, statusFromError(error), {
-      error: error?.message || "Failed to fetch thread.",
-    });
+    const timedOut = error?.name === "AbortError";
+    const message = timedOut ? "Thread request timed out." : error?.message || "Failed to fetch thread.";
+    if (res.headersSent) {
+      res.end(JSON.stringify({ error: message }) + "\n");
+    } else {
+      sendJSON(res, timedOut ? 504 : statusFromError(error), { error: message });
+    }
   } finally {
     clearTimeout(timer);
+    req.removeListener("error", stop);
+    res.removeListener("close", stop);
     controller.abort();
   }
 };

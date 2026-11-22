@@ -1,10 +1,11 @@
-// First-paint stories prefetch (same-origin only).
-(() => {
-  const url = "/api/stories?feed=best&offset=0&limit=12";
+import { FEED_BEST, INITIAL_PAGE_SIZE, STORIES_ENDPOINT } from "./modules/config.js";
+import { parseRoute } from "./modules/routing.js";
+
+if (parseRoute().type === "list") {
+  const url = `${STORIES_ENDPOINT}?feed=${FEED_BEST}&offset=0&limit=${INITIAL_PAGE_SIZE}`;
   window.__hnxStoriesPrefetch = {
     url,
     promise: fetch(url, {
-      cache: "no-store",
       headers: { accept: "application/json" },
     })
       .then(async (response) => {
@@ -23,4 +24,4 @@
       })
       .catch(() => null),
   };
-})();
+}

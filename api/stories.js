@@ -6,6 +6,7 @@ const {
   parseNonNegativeInt,
   normalizeFeed,
   feedPath,
+  isFirstFeedPage,
   normalizeListItem,
   fetchJSON,
   mapWithConcurrency,
@@ -75,7 +76,7 @@ module.exports = async function handler(req, res) {
       nextOffset,
       total: normalizedIds.length,
       hasMore,
-    });
+    }, { cacheFeed: isFirstFeedPage(req.query) });
   } catch (error) {
     if (error?.name === "AbortError") {
       sendJSON(res, 504, { error: "Stories request timed out." });

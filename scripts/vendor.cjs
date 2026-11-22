@@ -54,8 +54,7 @@ for (const file of bundled.outputFiles) {
   }
 }
 const importPath = `vendor/dompurify-${version}.es.mjs`;
-for (const file of ["public/modules/sanitize.js", "public/index.html"]) {
-  if (!fs.readFileSync(path.join(root, file), "utf8").includes(importPath)) {
-    throw new Error(`Update the DOMPurify reference in ${file} to ${importPath}.`);
-  }
+const importer = "public/modules/sanitize.js";
+if (!fs.readFileSync(path.join(root, importer), "utf8").includes(importPath)) {
+  throw new Error(`Update the DOMPurify reference in ${importer} to ${importPath}.`);
 }

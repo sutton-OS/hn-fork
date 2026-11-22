@@ -1,18 +1,21 @@
 const { describe, it, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const { fetchJSON, UPSTREAM } = require("../lib/hn");
 
 const originalFetch = global.fetch;
 afterEach(() => { global.fetch = originalFetch; });
 
 function response() {
-  return {
+  return Object.assign(new EventEmitter(), {
     headers: {},
     status(code) { this.statusCode = code; return this; },
     setHeader(name, value) { this.headers[name] = value; },
     send(body) { this.body = body; },
-  };
+  });
 }
+
+const request = (method, query) => Object.assign(new EventEmitter(), { method, query });
 
 const routes = [
   ["stories", require("../api/stories"), {}],
@@ -43,12 +46,12 @@ describe("API page failures", () => {
         return { ok: true, json: async () => ({ id, type: "story", title: `Item ${id}`, text: `Comment ${id}` }) };
       });
       const first = response();
-      await handler({ method: "GET", query }, first);
+      await handler(request("GET", query), first);
       assert.equal(first.statusCode, 502);
       assert.doesNotMatch(first.body, /No comments yet|No stories on this page/);
       failed = false;
       const retry = response();
-      await handler({ method: "GET", query }, retry);
+      await handler(request("GET", query), retry);
       assert.equal(retry.statusCode, 200);
       assert.match(retry.body, /11/);
       assert.match(retry.body, /12/);
@@ -57,21 +60,21 @@ describe("API page failures", () => {
     it(`${name}: propagates a child timeout`, async () => {
       upstream(async () => { throw new DOMException("Timed out", "AbortError"); });
       const res = response();
-      await handler({ method: "GET", query }, res);
+      await handler(request("GET", query), res);
       assert.equal(res.statusCode, 504);
     });
 
     it(`${name}: permits genuinely missing items`, async () => {
       upstream(async () => ({ ok: true, json: async () => null }));
       const res = response();
-      await handler({ method: "GET", query }, res);
+      await handler(request("GET", query), res);
       assert.equal(res.statusCode, 200);
     });
 
     it(`${name}: rejects non-GET requests without fetching upstream`, async () => {
       global.fetch = () => { assert.fail("Must not fetch upstream"); };
       const res = response();
-      await handler({ method: "POST", query }, res);
+      await handler(request("POST", query), res);
       assert.equal(res.statusCode, 405);
       assert.equal(res.headers.allow, "GET");
     });
@@ -100,4 +103,79 @@ describe("API page failures", () => {
     assert.equal(data.hasMore, true);
     assert.deepEqual(data.stories, []);
   });
+});
+
+it("caches only successful, standard first pages of public feeds", async () => {
+  upstream(async (url) => ({
+    ok: true,
+    json: async () => ({ id: Number(url.match(/\/(\d+)\.json$/)[1]), type: "story" }),
+  }));
+  const queries = [
+    [routes[0][1], { feed: "best", offset: "0", limit: "12" }, true],
+    [routes[0][1], { feed: "top", offset: "12", limit: "30" }, false],
+    [routes[0][1], { feed: "new", extra: "a" }, false],
+    [routes[0][1], { feed: ["best", "top"] }, false],
+    [routes[2][1], { feed: "new", theme: "light" }, true],
+    [routes[4][1], { feed: "top", skin: "classic" }, true],
+    [routes[2][1], { offset: "30" }, false],
+    [routes[1][1], { id: "1" }, false],
+  ];
+  for (const [handler, query, shouldCache] of queries) {
+    const res = response();
+    await handler(request("GET", query), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers["vercel-cdn-cache-control"], shouldCache ? "max-age=20" : undefined);
+    assert.equal(res.headers["cache-control"], shouldCache ? "public, max-age=0, must-revalidate" : "no-store");
+  }
+
+  upstream(async () => { throw new Error("Unavailable"); });
+  const res = response();
+  await routes[0][1]({ method: "GET", query: { feed: "best", offset: "0", limit: "12" } }, res);
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.headers["cache-control"], "no-store");
+  assert.equal(res.headers["vercel-cdn-cache-control"], undefined);
+});
+
+it("streams the parent before requesting its comments and reports a later failure", async () => {
+  const res = Object.assign(response(), {
+    packets: [],
+    write(line) {
+      this.headersSent = true;
+      this.packets.push(JSON.parse(line));
+    },
+    end(line) { this.write(line); },
+  });
+  let parentLookups = 0;
+  global.fetch = async (url) => {
+    if (url.endsWith("/item/1.json")) {
+      parentLookups++;
+      return { ok: true, json: async () => ({ id: 1, title: "Early title", kids: [11] }) };
+    }
+    assert.equal(res.packets[0]?.parent.title, "Early title");
+    throw new Error("Comment unavailable");
+  };
+  await routes[1][1](request("GET", { id: "1", stream: "1" }), res);
+  assert.equal(parentLookups, 1);
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers["content-type"], /application\/x-ndjson/);
+  assert.equal(res.headers["cache-control"], "no-store");
+  assert.deepEqual(res.packets[1], { error: "Comment unavailable" });
+});
+
+it("cancels an upstream comment fetch when the client disconnects", async () => {
+  const res = Object.assign(response(), { end() {} });
+  let childStarted;
+  const started = new Promise(resolve => { childStarted = resolve; });
+  upstream(async (_url, { signal }) => {
+    childStarted();
+    return new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  });
+  const handling = routes[1][1](request("GET", { id: "1" }), res);
+  await started;
+  res.destroyed = true;
+  res.emit("close");
+  await handling;
+  assert.equal(res.statusCode, undefined);
 });

@@ -72,4 +72,40 @@ describe("thread prefetch lifecycle", () => {
     await api.fetchThread(1);
     assert.equal(signals.length, 26);
   });
+
+  it("allows just two concurrent speculative requests", async () => {
+    const api = await client();
+    const finish = [];
+    global.fetch = () => new Promise(resolve => finish.push(resolve));
+    const first = api.prefetchThread(1);
+    const second = api.prefetchThread(2);
+    assert.equal(api.prefetchThread(3), null);
+    assert.equal(finish.length, 2);
+    finish[0](json({ id: 1 }));
+    await first;
+    const third = api.prefetchThread(3);
+    assert.equal(finish.length, 3);
+    finish[1](json({ id: 2 }));
+    finish[2](json({ id: 3 }));
+    await Promise.all([second, third]);
+  });
+});
+
+it("reads the story title before a later comment-stream failure", async () => {
+  const api = await client();
+  const encoder = new TextEncoder();
+  let send;
+  global.fetch = async (url) => {
+    assert.match(url, /[&?]stream=1/);
+    return new Response(new ReadableStream({ start(controller) { send = controller; } }), {
+      headers: { "content-type": "application/x-ndjson" },
+    });
+  };
+  const { parent, thread } = api.startDiscussion(1);
+  send.enqueue(encoder.encode('{"parent":'));
+  send.enqueue(encoder.encode('{"id":1,"title":"Early title"}}\n'));
+  assert.equal((await parent).title, "Early title");
+  send.enqueue(encoder.encode('{"error":"Comments unavailable"}\n'));
+  send.close();
+  await assert.rejects(thread, /Comments unavailable/);
 });

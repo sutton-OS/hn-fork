@@ -80,11 +80,13 @@ Browser tests exercise the real API handlers and configured security headers. Th
 
 ## Dependency updates
 
-Dependencies are pinned in `package.json` and `package-lock.json`; Dependabot checks npm packages weekly. DOMPurify runs in the browser from a self-hosted, versioned file. After updating it, update its filename references in `public/modules/sanitize.js` and `public/index.html`, then run `npm run vendor:sync` and `npm run verify`. Remove the previous vendored distribution when switching versions. The same command creates a CommonJS server sanitizer bundle in `lib/vendor/`, including license notices, because Vercel cannot load its ESM parser through CommonJS. Run it after any sanitizer or transitive dependency update. `npm run check` rejects any vendored distribution, license, or server sanitizer bundle that differs from the locked packages.
+Dependencies are pinned in `package.json` and `package-lock.json`; Dependabot checks npm packages weekly. DOMPurify runs in the browser from a self-hosted, versioned file loaded with the discussion view. After updating it, update its filename reference in `public/modules/sanitize.js`, then run `npm run vendor:sync` and `npm run verify`. Remove the previous vendored distribution when switching versions. The same command creates a CommonJS server sanitizer bundle in `lib/vendor/`, including license notices, because Vercel cannot load its ESM parser through CommonJS. Run it after any sanitizer or transitive dependency update. `npm run check` rejects any vendored distribution, license, or server sanitizer bundle that differs from the locked packages.
 
 ## Data loading
 
-Story and comment pages fail on upstream fetch errors instead of silently skipping unavailable items. Retry controls preserve the failed page; genuine missing/deleted items still advance pagination. Each reply list owns its pagination cursor and deduplicates comment IDs across pages. Thread prefetches expire after 30 seconds and are consumed once, so revisiting a discussion refreshes its comments. Comment indentation adds 14 pixels per level through depth six, then stops.
+Vercel caches successful standard first-page feed responses for 20 seconds. The modern feed loads 12 stories first and waits for scrolling when that page already fills the viewport. A direct discussion streams the title and story text before comments finish loading, using one request to Hacker News for the parent. Hover prefetches wait for sustained pointer intent and are capped at two in flight. Completed prefetches expire after 30 seconds and are consumed once. Opening prefetched comments fetches current story details in parallel.
+
+Story and comment pages fail on upstream fetch errors instead of silently skipping unavailable items. Retry controls preserve the failed page; genuine missing/deleted items still advance pagination. Each reply list owns its pagination cursor and deduplicates comment IDs across pages. Revisiting a discussion refreshes its comments. Comment indentation adds 14 pixels per level through depth six, then stops.
 
 ## Deploy
 

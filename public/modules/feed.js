@@ -1,7 +1,9 @@
 import { PAGE_SIZE, INITIAL_PAGE_SIZE } from "./config.js";
-import { getStories, getItem, wireDiscussionPrefetch } from "./api.js";
+import { getStories, getItem, wireDiscussionPrefetch } from "./api.js?v=35";
 import { navigateTo } from "./routing.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError, isInteractiveTarget } from "./utils.js";
+
+const LOAD_AHEAD_PX = 160;
 
 export function createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView }) {
   let selectedStoryIndex = -1;
@@ -301,15 +303,15 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     const controller = new AbortController();
     setViewController(controller);
     let infiniteObserver = null;
-    let scrollFallbackHandler = null;
+    let scrollHandler = null;
     const teardownInfiniteLoading = () => {
       if (infiniteObserver) {
         infiniteObserver.disconnect();
         infiniteObserver = null;
       }
-      if (scrollFallbackHandler) {
-        window.removeEventListener("scroll", scrollFallbackHandler);
-        scrollFallbackHandler = null;
+      if (scrollHandler) {
+        window.removeEventListener("scroll", scrollHandler);
+        scrollHandler = null;
       }
     };
 
@@ -424,6 +426,8 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       let isLoadingBatch = false;
       let hasMore = true;
       let nextBatchStart = 0;
+      let hasLoadedPage = false;
+      let hasScrolled = false;
       const seenStoryIds = new Set();
 
       const handleBackgroundLoadError = (error) => {
@@ -449,11 +453,13 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       });
 
       const shouldLoadMoreNow = () => {
-        if (!sentinel.isConnected) {
+        if (!hasLoadedPage || !sentinel.isConnected) {
           return false;
         }
+        const canScroll = document.documentElement.scrollHeight > window.innerHeight + 1;
+        if (canScroll && !hasScrolled && seenStoryIds.size) return false;
         const rect = sentinel.getBoundingClientRect();
-        return rect.top <= window.innerHeight + 600;
+        return rect.top <= window.innerHeight + LOAD_AHEAD_PX;
       };
 
       const requestNextBatchIfNeeded = () => {
@@ -497,6 +503,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           }
 
           const fetchedStories = Array.isArray(page.stories) ? page.stories : [];
+          hasLoadedPage = true;
           nextBatchStart = Number.isFinite(page.nextOffset)
             ? page.nextOffset
             : batchStart + batchLimit;
@@ -572,20 +579,20 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           (entries) => {
             const shouldLoad = entries.some((entry) => entry.isIntersecting);
             if (shouldLoad) {
-              loadNextBatchInBackground();
+              requestNextBatchIfNeeded();
             }
           },
-          { rootMargin: "600px 0px" },
+          { rootMargin: `${LOAD_AHEAD_PX}px 0px` },
         );
         infiniteObserver.observe(sentinel);
-      } else {
-        scrollFallbackHandler = () => {
-          if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600) {
-            loadNextBatchInBackground();
-          }
-        };
-        window.addEventListener("scroll", scrollFallbackHandler, { passive: true });
       }
+      scrollHandler = () => {
+        if (infiniteObserver && hasScrolled) return;
+        if (window.scrollY <= 0) return;
+        hasScrolled = true;
+        requestNextBatchIfNeeded();
+      };
+      window.addEventListener("scroll", scrollHandler, { passive: true });
 
       await loadNextBatch().catch(handleBackgroundLoadError);
     } catch (error) {

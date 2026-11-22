@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "api/thread.js": { "supportsCancellation": true }
+  },
   "rewrites": [
     {
       "source": "/plain",

@@ -1,10 +1,12 @@
 import { COMMENTS_PAGE_SIZE } from "./config.js";
-import { getItem, fetchThread, wireDiscussionPrefetch } from "./api.js";
+import { fetchThread, startDiscussion } from "./api.js?v=35";
+import { createCommentsView } from "./comments.js?v=35";
 import { sanitizeHNHTML } from "./sanitize.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError } from "./utils.js";
 
-export function createStoryView({ app, ui, comments, setViewController, isCurrentView }) {
+export function createStoryView({ app, ui }) {
   const { topbar, wireThemeToggle, wireFeedToggleButtons } = ui;
+  const comments = createCommentsView({ app });
   const { createCommentRenderState, wireCommentActions, initializeStoryKeyboard, teardownStoryKeyboard, mountChildList, renderRootMoreFooter, updateCommentStatus, selectCommentIndex } = comments;
 
   function normalizeStoryDetail(story) {
@@ -75,12 +77,12 @@ export function createStoryView({ app, ui, comments, setViewController, isCurren
     return rendered;
   }
 
-  async function renderStoryPage(id) {
+  async function renderStoryPage(id, signal, discussion) {
     const storyId = Number(id);
     app.dataset.view = "story";
     teardownStoryKeyboard();
 
-    if (!Number.isFinite(storyId) || storyId <= 0) {
+    if (!discussion) {
       app.innerHTML = `
         <section class="list-pane">
           ${topbar('<a class="btn" href="#/">back</a>')}
@@ -91,9 +93,6 @@ export function createStoryView({ app, ui, comments, setViewController, isCurren
       wireFeedToggleButtons();
       return;
     }
-
-    const controller = new AbortController();
-    setViewController(controller);
 
     app.innerHTML = `
       <section class="list-pane">
@@ -116,7 +115,6 @@ export function createStoryView({ app, ui, comments, setViewController, isCurren
     `;
     wireThemeToggle();
     wireFeedToggleButtons();
-    wireDiscussionPrefetch(app);
 
     let detailSlot = app.querySelector("[data-story-shell]");
     const commentsSection = app.querySelector(".comments");
@@ -128,125 +126,104 @@ export function createStoryView({ app, ui, comments, setViewController, isCurren
       return;
     }
 
-    const itemPromise = getItem(storyId, { signal: controller.signal }).catch(
-      () => null,
-    );
-    const threadPromise = fetchThread(storyId, {
-      signal: controller.signal,
-      offset: 0,
-      limit: COMMENTS_PAGE_SIZE,
-    });
-
-    void itemPromise.then((item) => {
-      if (
-        controller.signal.aborted ||
-        !isCurrentView(controller) ||
-        !detailSlot?.isConnected
-      ) {
-        return;
-      }
-      if (item && normalizeStoryDetail(item)) {
-        detailSlot = paintStoryDetail(detailSlot, item) || detailSlot;
-      }
-    });
-
-    let thread = null;
-    try {
-      thread = await threadPromise;
-    } catch (error) {
-      if (
-        isAbortError(error) ||
-        controller.signal.aborted ||
-        !isCurrentView(controller)
-      ) {
-        return;
-      }
-
-      if (detailSlot?.isConnected && detailSlot.hasAttribute("data-story-shell")) {
-        detailSlot.innerHTML = `
-          <div class="story-title">failed to load story</div>
-          <div class="story-meta"><span>${escapeHTML(error.message)}</span></div>
-        `;
-      }
-      skeleton?.remove();
-      commentsStatus.textContent = "Could not load comments.";
-      const retry = document.createElement("button");
-      retry.type = "button";
-      retry.className = "btn";
-      retry.textContent = "Retry loading comments";
-      retry.addEventListener("click", () => {
-        controller.abort();
-        void renderStoryPage(storyId);
-      }, { once: true });
-      commentsStatus.append(" ", retry);
-      return;
+    let currentParentPromise;
+    function watchStoryDetail(parentPromise) {
+      currentParentPromise = parentPromise;
+      void parentPromise.then((parent) => {
+        if (signal.aborted || parentPromise !== currentParentPromise ||
+            !detailSlot?.hasAttribute("data-story-shell")) return;
+        if (normalizeStoryDetail(parent)) {
+          detailSlot = paintStoryDetail(detailSlot, parent) || detailSlot;
+        }
+      });
     }
 
-    if (controller.signal.aborted || !isCurrentView(controller)) {
-      return;
-    }
+    async function loadComments(threadPromise, parentPromise) {
+      let thread;
+      try {
+        thread = await threadPromise;
+      } catch (error) {
+        if (isAbortError(error) || signal.aborted) return;
 
-    if (thread && normalizeStoryDetail(thread)) {
-      if (detailSlot?.isConnected && detailSlot.hasAttribute("data-story-shell")) {
-        detailSlot = paintStoryDetail(detailSlot, thread) || detailSlot;
-      }
-    } else if (detailSlot?.hasAttribute?.("data-story-shell")) {
-      const item = await itemPromise;
-      if (controller.signal.aborted || !isCurrentView(controller)) {
-        return;
-      }
-      if (item && normalizeStoryDetail(item)) {
-        detailSlot = paintStoryDetail(detailSlot, item) || detailSlot;
-      } else if (detailSlot?.isConnected) {
-        detailSlot.innerHTML = `<div class="story-title">story not found</div>`;
         skeleton?.remove();
-        commentsStatus.textContent = "No comments available.";
+        commentsStatus.textContent = "Could not load comments.";
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "btn";
+        retry.textContent = "Retry loading comments";
+        retry.addEventListener("click", () => {
+          commentsStatus.textContent = "Loading comments…";
+          if (detailSlot?.hasAttribute("data-story-shell")) {
+            const next = startDiscussion(storyId, { signal });
+            watchStoryDetail(next.parent);
+            void loadComments(next.thread, next.parent);
+          } else {
+            void loadComments(fetchThread(storyId, { signal }));
+          }
+        }, { once: true });
+        commentsStatus.append(" ", retry);
+
+        if (parentPromise) {
+          const parent = await parentPromise;
+          if (!signal.aborted && !parent && retry.isConnected && detailSlot?.hasAttribute("data-story-shell")) {
+            detailSlot.innerHTML = `
+              <div class="story-title">failed to load story</div>
+              <div class="story-meta"><span>${escapeHTML(error.message)}</span></div>
+            `;
+          }
+        }
         return;
       }
+      if (signal.aborted) return;
+      skeleton?.remove();
+      renderComments(thread);
     }
 
-    skeleton?.remove();
+    function renderComments(thread) {
+      const commentState = createCommentRenderState({
+        signal,
+        sectionEl: commentsSection,
+        rootEl: commentsRoot,
+        statusEl: commentsStatus,
+        parentId: storyId,
+      });
 
-    const commentState = createCommentRenderState({
-      signal: controller.signal,
-      sectionEl: commentsSection,
-      rootEl: commentsRoot,
-      statusEl: commentsStatus,
-      parentId: storyId,
-    });
+      const rootComments = Array.isArray(thread?.comments) ? thread.comments : [];
+      commentState.rootNextOffset = Number.isFinite(Number(thread?.nextOffset))
+        ? Number(thread.nextOffset)
+        : (Number(thread?.offset) || 0) + rootComments.length;
+      commentState.rootTotal = Number(thread?.total) || rootComments.length;
+      commentState.rootHasMore = Boolean(thread?.hasMore);
 
-    const rootComments = Array.isArray(thread?.comments) ? thread.comments : [];
-    commentState.rootNextOffset = Number.isFinite(Number(thread?.nextOffset))
-      ? Number(thread.nextOffset)
-      : (Number(thread?.offset) || 0) + rootComments.length;
-    commentState.rootTotal = Number(thread?.total) || rootComments.length;
-    commentState.rootHasMore = Boolean(thread?.hasMore);
+      wireCommentActions(commentState);
+      initializeStoryKeyboard();
 
-    wireCommentActions(commentState);
-    initializeStoryKeyboard();
-
-    if (!rootComments.length && !commentState.rootHasMore) {
-      commentsStatus.textContent = "No comments yet.";
-      return;
-    }
-
-    // Footer owns root "load more" — avoid a second in-list control.
-    mountChildList(commentState, commentState.rootEl, rootComments, 0, {
-      auto: true,
-      serverParentId: storyId,
-      serverNextOffset: commentState.rootNextOffset,
-      serverTotal: commentState.rootTotal,
-      serverHasMore: false,
-    });
-    renderRootMoreFooter(commentState, storyId);
-    updateCommentStatus(commentState);
-
-    window.requestAnimationFrame(() => {
-      if (!controller.signal.aborted) {
-        selectCommentIndex(0, { scroll: false });
+      if (!rootComments.length && !commentState.rootHasMore) {
+        commentsStatus.textContent = "No comments yet.";
+        return;
       }
-    });
+
+      // Footer owns root "load more" — avoid a second in-list control.
+      mountChildList(commentState, commentState.rootEl, rootComments, 0, {
+        auto: true,
+        serverParentId: storyId,
+        serverNextOffset: commentState.rootNextOffset,
+        serverTotal: commentState.rootTotal,
+        serverHasMore: false,
+      });
+      renderRootMoreFooter(commentState, storyId);
+      updateCommentStatus(commentState);
+
+      window.requestAnimationFrame(() => {
+        if (!signal.aborted) {
+          selectCommentIndex(0, { scroll: false });
+        }
+      });
+    }
+
+    watchStoryDetail(discussion.parent);
+    await loadComments(discussion.thread, discussion.parent);
   }
 
-  return { renderStoryPage };
+  return { renderStoryPage, teardownStoryKeyboard, toggleSelectedComment: comments.toggleSelectedComment };
 }

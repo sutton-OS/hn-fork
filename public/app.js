@@ -2,13 +2,14 @@ import { FEED_BEST, LIST_VISIBLE_REFRESH_AFTER_MS } from "./modules/config.js";
 import { normalizeFeed, isInteractiveTarget } from "./modules/utils.js";
 import { parseRoute } from "./modules/routing.js";
 import { createUI } from "./modules/ui.js";
-import { createFeedView } from "./modules/feed.js";
-import { createCommentsView } from "./modules/comments.js";
-import { createStoryView } from "./modules/story.js";
+import { createFeedView } from "./modules/feed.js?v=35";
+import { startDiscussion } from "./modules/api.js?v=35";
 
 const app = document.getElementById("app");
 app.classList.add("shell");
 let currentViewController = null;
+let story = null;
+let storyModule = null;
 let currentFeed = FEED_BEST;
 let listHiddenAt = 0;
 const DOUBLE_H_MS = 320;
@@ -20,8 +21,6 @@ const setViewController = (controller) => { currentViewController = controller; 
 const isCurrentView = (controller) => currentViewController === controller;
 const ui = createUI({ app, getCurrentFeed, setFeed: applyFeed });
 const feed = createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView });
-const comments = createCommentsView({ app });
-const story = createStoryView({ app, ui, comments, setViewController, isCurrentView });
 
 function classicSkinUrl() {
   const route = parseRoute();
@@ -65,7 +64,7 @@ function handleClassicSkinShortcut(event) {
     hTapTimer = null;
     // Single H: collapse/expand selected comment in story view only.
     if (app.dataset.view === "story") {
-      comments.toggleSelectedComment();
+      story?.toggleSelectedComment();
     }
   }, DOUBLE_H_MS);
 }
@@ -115,7 +114,35 @@ async function renderRoute(route = parseRoute()) {
   app.innerHTML = "";
 
   if (route.type === "story") {
-    await story.renderStoryPage(route.id);
+    const controller = new AbortController();
+    setViewController(controller);
+    const validId = Number.isInteger(route.id) && route.id > 0 && route.id <= 999999999999;
+    const discussion = validId ? startDiscussion(route.id, { signal: controller.signal }) : null;
+
+    try {
+      storyModule ??= import("./modules/story.js?v=35").catch((error) => {
+        storyModule = null;
+        throw error;
+      });
+      const { createStoryView } = await storyModule;
+      if (!isCurrentView(controller)) return;
+      story ??= createStoryView({ app, ui });
+      await story.renderStoryPage(route.id, controller.signal, discussion);
+    } catch {
+      if (!isCurrentView(controller) || controller.signal.aborted) return;
+      controller.abort();
+      app.innerHTML = `
+        <section class="list-pane">
+          ${ui.topbar('<a class="btn" href="#/">back</a>')}
+          <p class="status">Could not load the discussion.</p>
+          <button class="btn" type="button" data-story-retry>Retry loading discussion</button>
+        </section>
+      `;
+      ui.wireThemeToggle();
+      app.querySelector("[data-story-retry]").addEventListener("click", () => {
+        void renderRoute(route);
+      }, { once: true });
+    }
     return;
   }
 
@@ -147,7 +174,7 @@ function abortCurrentViewLoad() {
     currentViewController.abort();
     currentViewController = null;
   }
-  comments.teardownStoryKeyboard();
+  story?.teardownStoryKeyboard();
 }
 
 ui.applyTheme(ui.readStoredTheme());

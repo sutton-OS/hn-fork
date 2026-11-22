@@ -99,17 +99,25 @@ test("failed feed request retries without losing its page", async ({ page }) => 
 
 test("failed discussion offers an accessible retry", async ({ page }) => {
   let fail = true;
+  const requests = [];
   await page.route("**/api/thread?id=1&**", async route => {
-    if (fail) await route.fulfill({ status: 504, json: { error: "Timed out" } });
+    requests.push(new URL(route.request().url()).searchParams.get("stream"));
+    if (fail) await route.fulfill({
+      contentType: "application/x-ndjson",
+      body: '{"parent":{"id":1,"title":"Already loaded"}}\n{"error":"Timed out"}\n',
+    });
     else await route.continue();
   });
   await page.goto("/#/item/1");
   const retry = page.getByRole("button", { name: "Retry loading comments" });
   await expect(retry).toBeVisible();
+  await expect(page.locator(".story-detail .story-title")).toHaveText("Already loaded");
   fail = false;
   await retry.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator('.comment[data-comment-id="2"]')).toBeVisible();
+  await expect(page.locator(".story-detail .story-title")).toHaveText("Already loaded");
+  expect(requests).toEqual(["1", null]);
 });
 
 test("plain and classic pages work with scripts disabled and enforce headers", async ({ browser, baseURL }) => {
@@ -122,6 +130,7 @@ test("plain and classic pages work with scripts disabled and enforce headers", a
     expect(response.headers()["referrer-policy"]).toBe("no-referrer");
     await expect(page.locator("body")).toContainText(route.includes("item") ? "Many replies" : "Test discussion");
     await expect(page.locator("img, script")).toHaveCount(0);
+    await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /favicon-32x32/);
   }
   await context.close();
 });
@@ -139,7 +148,7 @@ test("prefetched metadata cannot overwrite fresh details and revisits refresh co
     await route.fulfill({ json: { id: 1, title: "Old prefetched title", comments: [{ id: 200 + revision, text: `Revision ${revision}`, replyCount: 0 }], nextOffset: 1, total: 1, hasMore: false } });
   });
   await page.goto("/");
-  await page.evaluate(() => { void import("/modules/api.js").then(api => api.prefetchThread(1)); });
+  await page.locator("a.meta-time").dispatchEvent("pointerover", { pointerType: "mouse" });
   await started;
   await page.evaluate(() => { location.hash = "/item/1"; });
   await expect(page.locator(".story-detail .story-title")).toHaveText("Fresh title");
@@ -151,6 +160,102 @@ test("prefetched metadata cannot overwrite fresh details and revisits refresh co
   await page.evaluate(() => { location.hash = "/item/1"; });
   await expect(page.locator(".comments")).toContainText("Revision 2");
   expect(calls).toBe(2);
+});
+
+test("cold feed waits for scrolling and defers discussion code", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 600 });
+  const offsets = [];
+  const requests = [];
+  page.on("request", request => requests.push(new URL(request.url()).pathname));
+  await page.route("**/api/stories?**", route => {
+    const params = new URL(route.request().url()).searchParams;
+    const offset = Number(params.get("offset"));
+    const limit = Number(params.get("limit"));
+    offsets.push(offset);
+    return route.fulfill({ json: {
+      stories: Array.from({ length: limit }, (_, index) => ({
+        id: offset + index + 1,
+        title: "A typical news story long enough to wrap across more than one line of text",
+      })),
+      nextOffset: offset + limit,
+      hasMore: offset === 0,
+    } });
+  });
+  await page.goto("/", { waitUntil: "networkidle" });
+  await expect(page.locator(".story-list .story")).toHaveCount(12);
+  expect(offsets).toEqual([0]);
+  expect(requests.filter(path => /\/(?:comments|story|sanitize)\.js$|dompurify/.test(path))).toEqual([]);
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(page.locator(".story-list .story")).toHaveCount(42);
+  expect(offsets).toEqual([0, 12]);
+});
+
+test("a direct discussion streams with no feed or separate item request", async ({ page }) => {
+  const requests = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) requests.push(url);
+  });
+  await page.goto("/#/item/1");
+  await expect(page.locator(".story-detail .story-title")).toHaveText("Test discussion");
+  await expect(page.locator('.comment[data-comment-id="2"]')).toBeVisible();
+  expect(requests.map(url => url.pathname)).toEqual(["/api/thread"]);
+  expect(requests[0].searchParams.get("stream")).toBe("1");
+});
+
+test("long comments clamp independently and expand on demand", async ({ page }) => {
+  await page.route("**/api/thread?id=1&**", route => route.fulfill({ json: {
+    id: 1,
+    title: "Test discussion",
+    comments: [
+      { id: 2, by: "reader", text: "<p>Short comment.</p>" },
+      { id: 3, by: "reader", text: `<p>${"A long line with more to read. ".repeat(160)}</p>` },
+    ],
+  } }));
+  await page.goto("/#/item/1");
+  const long = page.locator('.comment[data-comment-id="3"]');
+  const text = long.locator(".comment-text");
+  await expect(text).toHaveClass(/is-clamped/);
+  await expect(page.getByRole("button", { name: "Show more", exact: true })).toHaveCount(1);
+  await long.getByRole("button", { name: "Show more", exact: true }).click();
+  await expect(text).not.toHaveClass(/is-clamped/);
+});
+
+test("hover waits for intent and leaving cancels the in-flight prefetch", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/");
+  const link = page.locator("a.meta-time");
+  await expect(link).toBeVisible();
+  const lookups = [];
+  page.on("request", request => {
+    if (request.url().includes("/api/thread?")) lookups.push(request);
+  });
+  await link.dispatchEvent("pointerover", { pointerType: "touch" });
+  await page.clock.runFor(200);
+  await link.dispatchEvent("pointerover", { pointerType: "mouse" });
+  await link.dispatchEvent("pointerout", { pointerType: "mouse" });
+  await page.clock.runFor(200);
+  expect(lookups).toHaveLength(0);
+
+  let release;
+  const hold = new Promise(resolve => { release = resolve; });
+  await page.route("**/api/thread?**", async route => {
+    await hold;
+    await route.abort().catch(() => {});
+  });
+  try {
+    const pending = page.waitForRequest("**/api/thread?**");
+    await link.dispatchEvent("pointerover", { pointerType: "mouse" });
+    await page.clock.runFor(200);
+    const request = await pending;
+    const cancelled = page.waitForEvent("requestfailed", candidate => candidate === request);
+    await link.dispatchEvent("pointerout", { pointerType: "mouse" });
+    await cancelled;
+    expect(lookups).toHaveLength(1);
+  } finally {
+    release();
+  }
 });
 
 test("browser sanitizer removes malformed active markup and keeps safe links", async ({ page }) => {

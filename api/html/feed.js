@@ -5,6 +5,7 @@ const {
   parseNonNegativeInt,
   normalizeFeed,
   feedPath,
+  isFirstFeedPage,
   normalizeListItem,
   fetchJSON,
   mapWithConcurrency,
@@ -52,6 +53,7 @@ module.exports = async function handler(req, res) {
     parsePositiveInt(getQueryString(req.query?.limit), UPSTREAM.storiesDefaultLimit),
     UPSTREAM.storiesMaxLimit,
   );
+  const cacheFeed = isFirstFeedPage(req.query, { html: true });
 
   const currentPath = isClassic
     ? offset > 0
@@ -120,6 +122,7 @@ ${moreHtml}
           title: `HNx — ${feed}`,
           body,
         }),
+        { cacheFeed },
       );
       return;
     }
@@ -167,6 +170,7 @@ ${moreHtml}
         theme,
         body,
       }),
+      { cacheFeed },
     );
   } catch (error) {
     const message =

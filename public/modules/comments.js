@@ -1,5 +1,5 @@
 import { COMMENTS_PAGE_SIZE, COMMENTS_DOM_BATCH, MAX_COMMENT_DEPTH, COMMENT_CLAMP_PX } from "./config.js";
-import { fetchThread } from "./api.js";
+import { fetchThread } from "./api.js?v=35";
 import { sanitizeHNHTML } from "./sanitize.js";
 import { createTaskQueue, timeAgo, isAbortError, isInteractiveTarget } from "./utils.js";
 
@@ -115,16 +115,7 @@ export function createCommentsView({ app }) {
     model.controlEl = wrap;
   }
 
-  function maybeClampCommentText(textEl) {
-    if (!textEl?.isConnected || textEl.dataset.clampChecked === "true") {
-      return;
-    }
-    textEl.dataset.clampChecked = "true";
-
-    if (textEl.scrollHeight <= COMMENT_CLAMP_PX + 8) {
-      return;
-    }
-
+  function clampCommentText(textEl) {
     textEl.classList.add("is-clamped");
     textEl.style.maxHeight = `${COMMENT_CLAMP_PX}px`;
 
@@ -260,9 +251,10 @@ export function createCommentsView({ app }) {
                 state.loadedCount += items.length;
                 updateCommentStatus(state);
 
-                created.forEach((el) => {
-                  maybeClampCommentText(el.querySelector(".comment-text"));
-                });
+                const overflowing = created
+                  .map((el) => el.querySelector(".comment-text"))
+                  .filter((textEl) => textEl.scrollHeight > COMMENT_CLAMP_PX + 8);
+                overflowing.forEach(clampCommentText);
 
                 resolve();
               } catch (error) {
