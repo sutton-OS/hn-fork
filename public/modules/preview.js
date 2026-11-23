@@ -252,7 +252,7 @@ export function openPreview(link, restore, alertStory) {
       article.append(heading);
       content.append(article);
       if (alertStory.text) {
-        void import("./sanitize.js").then(({ sanitizeHNHTML }) => {
+        void import("./sanitize.js?v=41").then(({ sanitizeHNHTML }) => {
           if (signal.aborted) return;
           const text = document.createElement("div");
           text.innerHTML = sanitizeHNHTML(alertStory.text);

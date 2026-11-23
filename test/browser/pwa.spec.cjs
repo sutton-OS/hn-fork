@@ -31,7 +31,7 @@ test.beforeEach(async ({ context }) => {
 test.describe("PWA installation", () => {
   test.use({ serviceWorkers: "allow" });
 
-  test("manifest, branded icons and the cache-free root worker load", async ({ page, browserName }) => {
+  test("manifest, branded icons and the offline root worker load", async ({ page, browserName }) => {
     const response = await page.goto("/");
     expect(response.headers()["content-security-policy"]).toContain("worker-src 'self'");
     const manifestHref = await page.locator('link[rel="manifest"]').getAttribute("href");
@@ -57,7 +57,7 @@ test.describe("PWA installation", () => {
     }
     expect((await page.request.get("/sw.js")).headers()["cache-control"]).toBe("no-cache");
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toMatch(/\/sw\.js$/);
-    expect(await page.evaluate(() => caches.keys())).toEqual([]);
+    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v1"]);
     if (browserName === "chromium") {
       const devtools = await page.context().newCDPSession(page);
       expect((await devtools.send("Page.getAppManifest")).errors).toEqual([]);

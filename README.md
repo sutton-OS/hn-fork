@@ -11,7 +11,8 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - **Publisher favicons** in the full app come from Google’s favicon service with no referrer
 - **Vendored DOMPurify** for comment/HTML sanitization (no CDN)
 - **Strict security headers** (CSP, HSTS, Referrer-Policy, Permissions-Policy, COOP/CORP)
-- **No open URL-fetch proxy**
+- **Article previews and offline copies** resolve publisher URLs from Hacker News items
+- **Saved articles and recent feeds** are stored on the device for offline reading
 - **Theme and preview decisions** use tab `sessionStorage` only (so the privacy page matches light/dark)
 - **No-JS**: plain HTML reader at [`/plain`](https://hn-fork.vercel.app/plain) (server-rendered)
 - **Classic 90s skin**: bare HTML blue-links mode at [`/classic`](https://hn-fork.vercel.app/classic) (double-tap `H` from the modern app)
@@ -89,6 +90,12 @@ Dependencies are pinned in `package.json` and `package-lock.json`; Dependabot ch
 Vercel caches successful standard first-page feed responses for 20 seconds. The modern feed loads 12 stories first and waits for scrolling when that page already fills the viewport. A direct discussion streams the title and story text before comments finish loading, using one request to Hacker News for the parent. Hover prefetches wait for sustained pointer intent and are capped at two in flight. Completed prefetches expire after 30 seconds and are consumed once. Opening prefetched comments fetches current story details in parallel.
 
 Story and comment pages fail on upstream fetch errors instead of silently skipping unavailable items. Retry controls preserve the failed page; genuine missing/deleted items still advance pagination. Each reply list owns its pagination cursor and deduplicates comment IDs across pages. Revisiting a discussion refreshes its comments. Comment indentation adds 14 pixels per level through depth six, then stops.
+
+## Saved and offline
+
+Use the bookmark button on a feed story and open it from **Saved**. After the service worker installs, recently visited feed pages and saved copies are available offline. Saved text and images live in IndexedDB. Removing a bookmark deletes its copy. The Saved footer shows the browser’s estimated storage usage for the HNx origin.
+
+The offline Reader retrieves the article and up to eight images in one request using its HN item ID. Bump the `shell-vN` constant in `public/sw.js` and update the asset list when releasing shell changes.
 
 ## Deploy
 

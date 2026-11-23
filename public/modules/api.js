@@ -1,5 +1,6 @@
 import { STORIES_ENDPOINT, ITEM_ENDPOINT, THREAD_ENDPOINT, PAGE_SIZE, COMMENTS_PAGE_SIZE, THREAD_PREFETCH_MAX, THREAD_PREFETCH_TTL_MS } from "./config.js";
 import { normalizeFeed, createAbortError } from "./utils.js";
+import { requestFeedPage } from "./feed-cache.js";
 
 const threadPrefetchCache = new Map();
 const inflightPrefetches = new Set();
@@ -11,6 +12,10 @@ async function fetchResponse(
   { signal, errorPrefix = "Request failed", cache = "default", accept = "application/json" } = {},
 ) {
   const response = await fetch(url, { signal, cache, headers: { accept } });
+  return requireOK(response, url, errorPrefix);
+}
+
+async function requireOK(response, url, errorPrefix) {
   if (!response.ok) {
     let message = `${errorPrefix}: ${response.status} (${url})`;
     try {
@@ -26,7 +31,10 @@ async function fetchResponse(
 
 export async function fetchJSON(url, options = {}) {
   const { errorPrefix = "Request failed" } = options;
-  const response = await fetchResponse(url, options);
+  return readJSON(await fetchResponse(url, options), errorPrefix);
+}
+
+async function readJSON(response, errorPrefix) {
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   if (!contentType.includes("application/json")) {
     const body = await response.text();
@@ -218,6 +226,7 @@ export function wireDiscussionPrefetch(root) {
   }
 
   root.addEventListener("pointerover", (event) => {
+    if (!navigator.onLine) return;
     if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
     const link = event.target.closest?.(selector);
     if (!link || link === hoveredLink || !root.contains(link)) return;
@@ -293,17 +302,9 @@ export async function getStories(
     }
   }
 
-  // Same-origin only — no client-side Firebase fallback (privacy).
-  const params = new URLSearchParams({
-    feed: normalizedFeed,
-    offset: String(safeOffset),
-    limit: String(safeLimit),
-  });
-  const payload = await fetchJSON(`${STORIES_ENDPOINT}?${params.toString()}`, {
-    signal,
-    cache: safeOffset === 0 ? "default" : "no-store",
-    errorPrefix: "Stories request failed",
-  });
+  const response = await requestFeedPage(expectedUrl, { signal });
+  const errorPrefix = "Stories request failed";
+  const payload = await readJSON(await requireOK(response, expectedUrl, errorPrefix), errorPrefix);
   return normalizeStoriesPage(payload, { offset: safeOffset, limit: safeLimit });
 }
 

@@ -1,14 +1,18 @@
-import { FEED_BEST, LIST_VISIBLE_REFRESH_AFTER_MS } from "./modules/config.js";
+import { FEED_BEST, FEED_SAVED, LIST_VISIBLE_REFRESH_AFTER_MS } from "./modules/config.js";
 import { normalizeFeed, isInteractiveTarget } from "./modules/utils.js";
 import { wireNotificationStories, wirePreview } from "./modules/preview-entry.js";
 import { wireAlerts } from "./modules/alerts.js";
 import { touchInput, wirePWA } from "./modules/pwa.js";
 import { parseRoute } from "./modules/routing.js";
-import { createUI } from "./modules/ui.js?v=36";
-import { createFeedView } from "./modules/feed.js?v=39";
-import { startDiscussion } from "./modules/api.js?v=35";
+import { createUI } from "./modules/ui.js?v=41";
+import { createFeedView } from "./modules/feed.js?v=41";
+import { startDiscussion } from "./modules/api.js?v=41";
+
+import { createSavedStories } from "./modules/saved.js";
+import { createSavedView } from "./modules/saved-view.js";
 
 const app = document.getElementById("app");
+const banner = document.querySelector("[data-offline-banner]");
 app.classList.add("shell");
 wirePreview(app);
 let currentViewController = null;
@@ -24,8 +28,26 @@ let hTapPending = false;
 const getCurrentFeed = () => currentFeed;
 const setViewController = (controller) => { currentViewController = controller; };
 const isCurrentView = (controller) => currentViewController === controller;
-const ui = createUI({ app, getCurrentFeed, setFeed: applyFeed });
-const feed = createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView });
+const saved = createSavedStories();
+const savedView = createSavedView(saved);
+const ui = createUI({ app, getCurrentFeed, setFeed: applyFeed, saved });
+const feed = createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView, saved, savedView });
+
+function updateConnectivity() {
+  banner.hidden = navigator.onLine;
+}
+
+function guardOnlineAction(event) {
+  const link = event.target.closest?.("a[data-online-link]");
+  if (event.defaultPrevented || navigator.onLine || !link) return;
+  event.preventDefault();
+  saved.notify("You’re offline. Reconnect to open this link.");
+}
+
+saved.events.addEventListener("change", () => {
+  const count = app.querySelector("[data-saved-count]");
+  if (count) count.textContent = saved.count();
+});
 
 function classicSkinUrl() {
   const route = parseRoute();
@@ -38,7 +60,7 @@ function classicSkinUrl() {
 
 function handleClassicSkinShortcut(event) {
   if (document.body.classList.contains("preview-open")) return;
-  if (event.defaultPrevented) {
+  if (event.defaultPrevented || savedView.dialog.open) {
     return;
   }
   if (event.metaKey || event.ctrlKey || event.altKey) {
@@ -98,7 +120,7 @@ function handleVisibilityChange() {
 
 function refreshCurrentList() {
   if (document.body.classList.contains("preview-open")) return;
-  if (app.dataset.view !== "list") {
+  if (app.dataset.view !== "list" || currentFeed === FEED_SAVED || !navigator.onLine || savedView.dialog.open) {
     return;
   }
   void renderRoute({ type: "list" });
@@ -121,13 +143,23 @@ async function renderRoute(route = parseRoute(), scrollTop) {
   app.innerHTML = "";
 
   if (route.type === "story") {
+    if (!navigator.onLine) {
+      app.dataset.view = "story";
+      app.innerHTML = `
+        <section class="list-pane">
+          ${ui.topbar('<a class="btn" href="#/">back</a>')}
+          <p class="status">Reconnect to load this discussion.</p>
+        </section>
+      `;
+      return;
+    }
     const controller = new AbortController();
     setViewController(controller);
     const validId = Number.isInteger(route.id) && route.id > 0 && route.id <= 999999999999;
     const discussion = validId ? startDiscussion(route.id, { signal: controller.signal }) : null;
 
     try {
-      storyModule ??= import("./modules/story.js?v=36").catch((error) => {
+      storyModule ??= import("./modules/story.js?v=41").catch((error) => {
         storyModule = null;
         throw error;
       });
@@ -161,7 +193,7 @@ function canHandleRouteInPlace(route) {
 }
 
 function applyFeed(feed) {
-  const nextFeed = normalizeFeed(feed);
+  const nextFeed = feed === FEED_SAVED ? FEED_SAVED : normalizeFeed(feed);
   let scrollTop;
   if (touchInput.matches && nextFeed !== currentFeed && app.dataset.view === "list") {
     const panel = app.querySelector("#feed-panel");
@@ -197,6 +229,11 @@ window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("pageshow", handlePageShow);
 document.addEventListener("visibilitychange", handleVisibilityChange);
 document.addEventListener("keydown", handleClassicSkinShortcut, true);
+document.addEventListener("click", guardOnlineAction);
+document.addEventListener("auxclick", guardOnlineAction);
+window.addEventListener("online", updateConnectivity);
+window.addEventListener("offline", updateConnectivity);
+updateConnectivity();
 wirePWA(app, refreshCurrentList);
 wireAlerts(app);
 wireNotificationStories(app);

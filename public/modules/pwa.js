@@ -134,7 +134,7 @@ export function wirePWA(app, refresh) {
 
   if ("serviceWorker" in navigator) {
     const register = () => {
-      navigator.serviceWorker.register("/sw.js").catch((error) => {
+      navigator.serviceWorker.register("/sw.js", { type: "module", updateViaCache: "none" }).catch((error) => {
         console.warn("HNx service worker registration failed", error);
       });
     };

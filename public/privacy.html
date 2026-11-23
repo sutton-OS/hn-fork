@@ -13,8 +13,8 @@
     />
     <title>Privacy — HNx</title>
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2" />
-    <script src="./theme-init.js?v=39"></script>
-    <link rel="stylesheet" href="./styles.css?v=37" />
+    <script src="/theme-init.js?v=41"></script>
+    <link rel="stylesheet" href="/styles.css?v=41" />
   </head>
   <body class="privacy-page">
     <main class="privacy-shell">
@@ -84,6 +84,18 @@
           a direct relationship with upstream hosts.
         </p>
 
+        <h2>Saved stories and offline reading</h2>
+        <p>
+          Saved bookmarks, article text, and downloaded images are stored in this browser.
+          Remove a story or clear saved stories from the Saved tab. The app also stores its
+          interface and recently loaded feed pages on this device for offline use.
+        </p>
+        <p>
+          When you save an article, HNx requests the public article and up to eight images
+          from their publishers on your behalf. Those requests carry no browser cookies
+          or authorization headers. Your browser sends the Hacker News story ID to HNx, which looks up the article URL.
+        </p>
+
         <h2>What the host may see</h2>
         <p>
           Like any website, the hosting provider (Vercel) processes standard request
@@ -145,7 +157,7 @@
 
         <h2>What leaves when you open a story</h2>
         <p>
-          Tapping a mobile headline sends its URL to HNx. The server checks whether the
+          Tapping a mobile headline sends its Hacker News story ID to HNx. The server looks up the URL and checks whether the
           publisher permits framing and can fetch a reader copy without sending your
           cookies or credentials. Successful reader copies can stay in server memory for an hour.
           The host briefly counts requests by IP to limit abuse.
@@ -162,15 +174,14 @@
           <li>
             Content-Security-Policy with <code>default-src 'none'</code> and
             first-party allowlists for scripts, styles, fonts, and API calls. The
-            modern feed also allows publisher frames and HTTPS article images.
+            modern app also allows publisher frames, HTTPS article images, and locally saved image blobs.
           </li>
           <li>Strict-Transport-Security, frame denial, nosniff, Permissions-Policy</li>
           <li>
             Full app: HN HTML sanitized with vendored DOMPurify before render.
             Plain HTML reader: parser-based server-side allowlist sanitizer (http(s) links only).
           </li>
-          <li>Preview endpoints limit request time, response size, and access to private network addresses.</li>
-          <li>The installable reader uses a service worker without an offline cache.</li>
+          <li>Reader and preview requests resolve their destinations from Hacker News and enforce public network addresses, time limits, and response size limits.</li>
         </ul>
 
         <h2>Source</h2>

@@ -1,6 +1,6 @@
 import { COMMENTS_PAGE_SIZE, COMMENTS_DOM_BATCH, MAX_COMMENT_DEPTH, COMMENT_CLAMP_PX } from "./config.js";
-import { fetchThread } from "./api.js?v=35";
-import { sanitizeHNHTML } from "./sanitize.js";
+import { fetchThread } from "./api.js?v=41";
+import { sanitizeHNHTML } from "./sanitize.js?v=41";
 import { createTaskQueue, timeAgo, isAbortError, isInteractiveTarget } from "./utils.js";
 
 export function createCommentsView({ app }) {

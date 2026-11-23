@@ -1,8 +1,8 @@
-import { FEEDS } from "./config.js";
+import { FEEDS, FEED_SAVED } from "./config.js";
 
-const feedLabels = { best: "Best", top: "Top", new: "New" };
+const feedLabels = { best: "Best", top: "Top", new: "New", saved: "Saved" };
 
-export function createUI({ app, getCurrentFeed, setFeed }) {
+export function createUI({ app, getCurrentFeed, setFeed, saved }) {
   function getFeedTab(feed) {
     const isActive = feed === getCurrentFeed();
     return `
@@ -15,7 +15,7 @@ export function createUI({ app, getCurrentFeed, setFeed }) {
         aria-controls="feed-panel"
         aria-selected="${isActive}"
         tabindex="${isActive ? 0 : -1}"
-      >${feedLabels[feed]}</button>
+      >${feedLabels[feed]}${feed === FEED_SAVED ? ` <span class="saved-count" data-saved-count>${saved.count()}</span>` : ""}</button>
     `;
   }
 
@@ -71,7 +71,7 @@ export function createUI({ app, getCurrentFeed, setFeed }) {
   function topbar(content = "") {
     const leftContent = content.trim() || `
       <div class="feed-picker" role="tablist" aria-label="Story feed" data-feed-picker>
-        ${FEEDS.map(getFeedTab).join("")}
+        ${[...FEEDS, FEED_SAVED].map(getFeedTab).join("")}
       </div>
     `;
 

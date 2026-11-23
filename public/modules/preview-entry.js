@@ -1,4 +1,4 @@
-import { getItem } from "./api.js?v=35";
+import { getItem } from "./api.js?v=41";
 import { closeOpenSheet } from "./sheet.js";
 import { getSafeUrl } from "./utils.js";
 
@@ -93,7 +93,7 @@ export function wirePreview(app) {
   app.addEventListener("click", event => {
     const link = event.target.closest('.story-list .story-title a[target="_blank"]');
     if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.shiftKey ||
-        event.altKey || event.metaKey || !mobile.matches || link.hasAttribute("download") || link.dataset.previewBypass) return;
+        event.altKey || event.metaKey || !navigator.onLine || !mobile.matches || link.hasAttribute("download") || link.dataset.previewBypass) return;
     const url = new URL(link.href);
     if (!["http:", "https:"].includes(url.protocol) || url.origin === location.origin ||
         filePath.test(url.pathname) || url.searchParams.has("download")) return;

@@ -81,13 +81,17 @@ test("API routes inspect final headers, extract sanitized content and reuse succ
     assert.ok(match, `Unexpected item lookup: ${url}`);
     return { ok: true, json: async () => items.get(Number(match[1])) ?? null };
   });
-  const article = '<title>Sample</title><article><h1>Sample</h1><p>' + "Readable article content. ".repeat(15) +
-    '</p><img src="/photo.jpg" onload="unused()" style="float:left"><a href="more">More</a><form><input></form></article>';
+  const article = '<title>Sample</title><base href="https://unrelated.example/"><article><h1>Sample</h1><p>' +
+    "Readable article content. ".repeat(15) + '</p><img src="/photo.jpg" onload="unused()" style="float:left">' +
+    '<img src="/oversized.png"><img src="/not-an-image"><a href="more">More</a><form><input></form></article>';
   t.mock.method(require("node:https"), "request", (url, options, callback) => {
     requests.push([options.method, url.pathname, options.headers]);
     const req = new EventEmitter();
     req.end = () => {
-      const page = url.pathname === "/start" ? response(302, { location: "/post" }) :
+      const page = url.pathname === "/photo.jpg" ? response(200, { "content-type": "image/jpeg" }, "jpeg fixture") :
+        url.pathname === "/oversized.png" ? response(200, { "content-type": "image/png", "content-length": "2097153" }) :
+        url.pathname === "/not-an-image" ? response(200, { "content-type": "text/html" }, "Not an image") :
+        url.pathname === "/start" ? response(302, { location: "/post" }) :
         options.method === "HEAD" ? response(405, {}) : response(200,
           { "content-type": "text/html", "x-frame-options": "DENY" }, url.pathname === "/empty" ? "<main>Loading</main>" : article);
       callback(page);
@@ -120,11 +124,17 @@ test("API routes inspect final headers, extract sanitized content and reuse succ
   assert.ok(data.textLength >= 200);
   assert.match(data.html, /src="https:\/\/93\.184\.216\.34\/photo.jpg"/);
   assert.match(data.html, /href="https:\/\/93\.184\.216\.34\/more"/);
-  assert.doesNotMatch(data.html, /onload|style=|<form|<input/);
+  assert.doesNotMatch(data.html, /onload|style=|<form|<input|unrelated\.example/);
+  assert.equal(data.images, undefined);
   for (const [, , headers] of requests) assert.doesNotMatch(JSON.stringify(headers), /cookie|authorization/i);
   const count = requests.length;
   assert.equal((await call(reader, start)).code, 200);
   assert.equal(requests.length, count);
+  const saved = await call(reader, { ...start, offline: "1" });
+  assert.equal(saved.code, 200);
+  assert.deepEqual(saved.data.images, [{ index: 0, mime: "image/jpeg", base64: Buffer.from("jpeg fixture").toString("base64") }]);
+  assert.deepEqual(requests.slice(count).map(([, path, headers]) => [path, headers.Accept]),
+    [["/photo.jpg", "image/*"], ["/oversized.png", "image/*"], ["/not-an-image", "image/*"]]);
   assert.equal((await call(reader, { id: "2" })).code, 422);
   assert.equal((await call(reader, start, { origin: "https://elsewhere.example" })).code, 403);
   let limited;

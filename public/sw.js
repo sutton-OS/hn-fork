@@ -1,11 +1,86 @@
-importScripts("/modules/alert-device.js");
+import "./modules/alert-device.js";
+import { FEED_CACHE } from "./modules/feed-cache.js";
+
+const STATIC_CACHE = "shell-v1";
+const STATIC_ASSETS = [
+  "/index.html",
+  "/app.js?v=41",
+  "/prefetch.js?v=41",
+  "/theme-init.js?v=41",
+  "/styles.css?v=41",
+  "/privacy.html",
+  "/manifest.webmanifest",
+  "/maskable-512x512.png",
+  "/favicon.png",
+  "/favicon-32x32.png?v=2",
+  "/favicon-16x16.png?v=2",
+  "/apple-touch-icon.png?v=2",
+  "/android-chrome-192x192.png",
+  "/android-chrome-512x512.png",
+  "/fonts/Geist-1.9.2-Variable.woff2",
+  "/fonts/GeistMono-1.9.2-Variable.woff2",
+  "/vendor/dompurify-3.5.0.es.mjs",
+  "/modules/alert-device.js",
+  "/modules/alert-rules.js",
+  "/modules/alerts.js",
+  "/modules/api.js?v=41",
+  "/modules/comments.js?v=41",
+  "/modules/config.js",
+  "/modules/feed-cache.js",
+  "/modules/feed.js?v=41",
+  "/modules/preview-entry.js",
+  "/modules/preview.js",
+  "/modules/pwa.js",
+  "/modules/routing.js",
+  "/modules/sanitize.js?v=41",
+  "/modules/saved-store.js",
+  "/modules/saved-view.js",
+  "/modules/saved.js",
+  "/modules/sheet.js",
+  "/modules/story.js?v=41",
+  "/modules/ui.js?v=41",
+  "/modules/utils.js",
+];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    caches.open(STATIC_CACHE)
+      .then((cache) => cache.addAll(STATIC_ASSETS.map((url) => new Request(url, { cache: "reload" }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((key) =>
+      /^(?:shell-v|hnx-static-v|hnx-api-v|hnx-feed-v)\d+$/.test(key) &&
+      key !== STATIC_CACHE && key !== FEED_CACHE,
+    ).map((key) => caches.delete(key)));
+    await self.clients.claim();
+  })());
+});
+
+async function networkFirstNavigation(request) {
+  try {
+    return await fetch(request, { cache: "no-cache" });
+  } catch {
+    const cache = await caches.open(STATIC_CACHE);
+    return (await cache.match(request)) || (await cache.match("/index.html")) || Response.error();
+  }
+}
+
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+  if (request.method !== "GET" || url.origin !== self.location.origin) return;
+
+  if (url.pathname.startsWith("/api/")) return;
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirstNavigation(request));
+  } else if (STATIC_ASSETS.includes(url.pathname + url.search)) {
+    event.respondWith(caches.match(request, { cacheName: STATIC_CACHE }).then((cached) => cached || fetch(request)));
+  }
 });
 
 const alerts = self.hnxAlertDevice;

@@ -1,5 +1,8 @@
 const { test, expect } = require("@playwright/test");
 
+// These cases intercept requests from the page. The offline suite exercises the real worker.
+test.use({ serviceWorkers: "block" });
+
 test.beforeEach(async ({ context }) => {
   await context.route("https://www.google.com/s2/favicons?**", route => route.abort());
 });
