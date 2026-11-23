@@ -30,6 +30,8 @@ export function createStoryView({ app, ui }) {
       by,
       time: Number.isFinite(time) ? time : 0,
       text: typeof story.text === "string" ? story.text : "",
+      deleted: Boolean(story.deleted),
+      dead: Boolean(story.dead),
       score: Number.isFinite(Number(story.score)) ? Number(story.score) : 0,
     };
   }
@@ -39,7 +41,7 @@ export function createStoryView({ app, ui }) {
     const domain = getDomain(normalized.url);
     const safeUrl = getSafeUrl(normalized.url);
     const title = escapeHTML(normalized.title || "Untitled");
-    const storyText = normalized.text ? sanitizeHNHTML(normalized.text) : "";
+    const storyText = normalized.deleted ? "[deleted]" : normalized.dead ? "[dead]" : sanitizeHNHTML(normalized.text);
     const byline = normalized.by ? escapeHTML(normalized.by) : "";
 
     const urlLabel = safeUrl || "";

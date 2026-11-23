@@ -5,13 +5,14 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 ## Privacy posture
 
 - **No accounts, cookies, analytics, or ads**
+- **Optional push alerts** use a per-browser subscription and server-side rules that can be deleted from the Alerts panel
 - **Self-hosted fonts** (no Google Fonts)
 - **Browser → first party only** for HN data (`/api/*`)
 - **Publisher favicons** in the full app come from Google’s favicon service with no referrer
 - **Vendored DOMPurify** for comment/HTML sanitization (no CDN)
 - **Strict security headers** (CSP, HSTS, Referrer-Policy, Permissions-Policy, COOP/CORP)
 - **No open URL-fetch proxy**
-- **Theme** uses tab `sessionStorage` only (so the privacy page matches light/dark)
+- **Theme and preview decisions** use tab `sessionStorage` only (so the privacy page matches light/dark)
 - **No-JS**: plain HTML reader at [`/plain`](https://hn-fork.vercel.app/plain) (server-rendered)
 - **Classic 90s skin**: bare HTML blue-links mode at [`/classic`](https://hn-fork.vercel.app/classic) (double-tap `H` from the modern app)
 - See [`public/privacy.html`](public/privacy.html) for the user-facing policy
@@ -20,7 +21,7 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 
 - `public/` — static UI (`index.html`, `app.js`, `styles.css`, vendored libs, fonts)
 - `public/modules/` — native ES modules for routing, API/cache, feeds, stories, comments, shared UI, and sanitization
-- `api/` — Vercel serverless endpoints (`stories`, `item`, `thread`, `html/*`)
+- `api/` — Vercel serverless endpoints for HN data, previews, and push alerts
 - `lib/hn.js` — shared HN fetch/normalize helpers for API routes
 - `lib/html.js` — HTML escaping, parser-based `sanitize-html` sanitizer, and plain-reader layout helpers
 - `test/` — unit/API regression tests and desktop/mobile Playwright tests
@@ -93,7 +94,47 @@ Story and comment pages fail on upstream fetch errors instead of silently skippi
 
 Deploy on Vercel. Static files live in `public/`, and serverless endpoints live in `api/`. There is no build step.
 
-Run `npm run verify` before `vercel --prod`. The linked Vercel project uses Node 24 and installs the locked runtime dependencies for server-rendered sanitization.
+Run `npm run verify` before `vercel --prod`. The linked Vercel project uses Node 24 and installs the locked runtime dependencies. Deploy the static client, functions, `vercel.json`, and lockfile together. Push alerts use the configuration below.
+
+## Push alerts
+
+Upstash Redis stores subscriptions and alert history. A Cloudflare Cron Trigger calls the existing Vercel deployment every ten minutes (`*/10 * * * *`, UTC).
+
+Create an Upstash Redis database for the production site. Configure these values in the Vercel project's **Production** environment and redeploy. Enable Fluid Compute for the scheduled function's configured 180-second duration.
+
+| Vercel variable | Value |
+| --- | --- |
+| `ALERTS_ORIGIN` | The canonical HTTPS site origin, such as `https://hn-fork.vercel.app`, without a trailing slash. The Alerts API accepts browser writes from this origin. |
+| `VAPID_PUBLIC_KEY` | Public key from `npx web-push generate-vapid-keys`. The client reads it from `GET /api/subscribe`. |
+| `VAPID_PRIVATE_KEY` | Private key from the same command. Save it as a secret and retain the key pair across deployments. |
+| `VAPID_SUBJECT` | A monitored contact address, such as `mailto:alerts@example.com`. |
+| `UPSTASH_REDIS_REST_URL` | The Upstash Redis HTTPS REST endpoint. |
+| `UPSTASH_REDIS_REST_TOKEN` | The Redis write token, stored as a secret. |
+| `CRON_SECRET` | A shared secret of at least 32 characters. Generate it with `openssl rand -hex 32` and store the same value in Vercel and Cloudflare. |
+
+1. Configure the Cloudflare Worker in [scheduler/wrangler.toml](scheduler/wrangler.toml). Set `ALERTS_ORIGIN` to the same site origin as Vercel and add `CRON_SECRET` as a Worker secret. The Worker sends it as a bearer token to `GET /api/alert-job`.
+2. Deploy from the repository root with Wrangler. The first secret command can prompt you to create the Worker if it does not exist. Replace the example origin in the deploy command if needed.
+
+   ```sh
+   npx wrangler secret put CRON_SECRET --config scheduler/wrangler.toml
+   npx wrangler deploy --config scheduler/wrangler.toml --var ALERTS_ORIGIN:https://hn-fork.vercel.app
+   ```
+
+3. If the deployment uses egress filtering, allow HTTPS to the configured push providers, including `*.push.apple.com`. Verify the next scheduled invocation in Cloudflare and look for `HNx alerts run` in Vercel logs.
+
+On iOS and iPadOS 16.4 or later, install HNx on the Home Screen and open the installed app before enabling notifications. Other browsers can use alerts wherever they support Web Push. A rule matches any of its keyword terms as a whole word. Double quotes match the enclosed phrase and a domain filter includes its subdomains. The first scan can alert on stories already at or above the threshold in the current top, best, or new feed. Each story is deduplicated for seven days. A summary counts toward the rolling five-per-hour limit, along with individual and test notifications. New matches wait for the next scan with available capacity if all slots have been used.
+
+The API uses short-lived per-IP rate counters keyed by a one-way digest. Deleting alerts removes the subscription, rules, and its delivery history. The scheduler reserves deliveries before sending so retries and overlapping runs cannot send the same story again. A reservation is kept if the push provider's response leaves delivery uncertain.
+
+To exercise the Redis scripts with an isolated local Redis instance, set `HNX_REDIS_SERVER` to the path of `redis-server` (with `redis-cli` next to it) and run `node --test test/alerts.test.js`. For device acceptance, send a test with the installed app in the background, check the lock screen and icon badge, then tap a matching story notification with the app open and again after closing it.
+
+## Mobile link previews
+
+External headlines in the modern feed open a bottom sheet on coarse-pointer screens up to 768px wide. The sheet keeps the selected row, scroll position, and a Back entry. The header offers the original link in every mode. The plain and classic skins keep their native links.
+
+`GET /api/embeddable?id=…` checks final publisher headers with HEAD and a bounded GET fallback. `GET /api/reader?id=…` extracts public HTML with Readability and sanitizes it with DOMPurify in a time-limited jsdom worker. Both endpoints resolve the publisher link from the Hacker News item identified by `id`. Publisher requests use vetted public addresses, and the eight-second budget covers the item lookup and preview. Warm function instances cache frame decisions for 24 hours and reader results for up to one hour, and limit each client IP to 40 requests per minute per instance. A domain cache entry is reused only for the same URL because paths can have different frame policies, redirects, or content types.
+
+Known media and file extensions use native links. For extensionless files discovered by the server, the sheet opens a tab when the browser permits it and otherwise provides an explicit link.
 
 ## Keyboard
 

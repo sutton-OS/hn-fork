@@ -10,17 +10,17 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
   let listKeyboardHandler = null;
   const { topbar, wireFeedToggleButtons } = ui;
 
-  function setSelectedStoryElement(storyEl, { scroll = false } = {}) {
+  function setSelectedStoryElement(storyEl) {
     if (!storyEl) {
       return;
     }
     const stories = getListStoryElements();
     const nextIndex = stories.indexOf(storyEl);
-    if (nextIndex < 0) {
+    if (nextIndex < 0 || nextIndex === selectedStoryIndex) {
       return;
     }
     selectedStoryIndex = nextIndex;
-    applyListSelection({ scroll });
+    applyListSelection();
   }
 
   function getListStoryElements() {
@@ -153,7 +153,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
 
     const href = getSafeUrl(link.getAttribute("href"));
     if (href) {
-      window.open(href, "_blank", "noopener,noreferrer");
+      link.click();
       return;
     }
 
@@ -175,7 +175,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
   }
 
   function handleListKeyboardNavigation(event) {
-    if (event.defaultPrevented) {
+    if (event.defaultPrevented || document.body.classList.contains("preview-open")) {
       return;
     }
 
@@ -236,28 +236,14 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     if (!listEl.dataset.selectionWired) {
       listEl.dataset.selectionWired = "true";
 
-      listEl.addEventListener("mousemove", (event) => {
-        const hovered = event.target.closest(".story");
-        if (!hovered || !listEl.contains(hovered)) {
-          return;
-        }
-        const nextIndex = getListStoryElements().indexOf(hovered);
-        if (nextIndex >= 0 && nextIndex !== selectedStoryIndex) {
-          selectedStoryIndex = nextIndex;
-          applyListSelection({ scroll: false });
+      listEl.addEventListener("pointermove", (event) => {
+        if (event.pointerType === "mouse") {
+          setSelectedStoryElement(event.target.closest(".story"));
         }
       });
 
       listEl.addEventListener("focusin", (event) => {
-        const focused = event.target.closest(".story");
-        if (!focused || !listEl.contains(focused)) {
-          return;
-        }
-        const nextIndex = getListStoryElements().indexOf(focused);
-        if (nextIndex >= 0 && nextIndex !== selectedStoryIndex) {
-          selectedStoryIndex = nextIndex;
-          applyListSelection({ scroll: false });
-        }
+        setSelectedStoryElement(event.target.closest(".story"));
       });
     }
 
@@ -299,7 +285,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     `;
   }
 
-  async function renderListPage() {
+  async function renderListPage({ scrollTop = 0 } = {}) {
     const controller = new AbortController();
     setViewController(controller);
     let infiniteObserver = null;
@@ -323,6 +309,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
         <section class="list-pane">
           ${topbar()}
           <div id="feed-panel" role="tabpanel" aria-labelledby="feed-tab-${getCurrentFeed()}" aria-busy="true">
+            <div class="pull-indicator" aria-hidden="true"></div>
             <ul class="story-list" role="list"></ul>
             <p class="status" data-list-status hidden></p>
             <button class="btn" type="button" data-list-retry hidden>Retry loading stories</button>
@@ -341,6 +328,13 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       if (!listEl || !listStatus || !sentinel) {
         return;
       }
+
+      let restoreTop = scrollTop;
+      panel.toggleAttribute("data-restoring-scroll", restoreTop > 0);
+      const finishRestoringScroll = () => {
+        restoreTop = 0;
+        panel.removeAttribute("data-restoring-scroll");
+      };
 
       initializeListSelection(listEl);
       listEl.addEventListener("error", (event) => {
@@ -366,24 +360,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       };
 
       listEl.addEventListener("click", async (event) => {
-        const titleLink = event.target.closest(".story-title a");
-        if (titleLink && listEl.contains(titleLink)) {
-          const storyRow = titleLink.closest(".story");
-          if (storyRow) {
-            setSelectedStoryElement(storyRow);
-          }
-          return;
-        }
-
-        const discussionLink = event.target.closest("a.story-comments-link");
-        if (discussionLink && listEl.contains(discussionLink)) {
-          const storyRow = discussionLink.closest(".story");
-          if (storyRow) {
-            setSelectedStoryElement(storyRow);
-          }
-          return;
-        }
-
+        setSelectedStoryElement(event.target.closest(".story"));
         const retryButton = event.target.closest("[data-retry-id]");
         if (!retryButton) {
           return;
@@ -458,7 +435,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       });
 
       const shouldLoadMoreNow = () => {
-        if (!hasLoadedPage || !sentinel.isConnected) {
+        if (restoreTop || !hasLoadedPage || !sentinel.isConnected || document.body.classList.contains("preview-open")) {
           return false;
         }
         const canScroll = document.documentElement.scrollHeight > window.innerHeight + 1;
@@ -594,6 +571,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       scrollHandler = () => {
         if (infiniteObserver && hasScrolled) return;
         if (window.scrollY <= 0) return;
+        finishRestoringScroll();
         hasScrolled = true;
         requestNextBatchIfNeeded();
       };
@@ -601,6 +579,24 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
 
       await loadNextBatch().catch(handleBackgroundLoadError);
       panel.removeAttribute("aria-busy");
+
+      // A saved position can be below the first page. Use the normal pager to
+      // reach it, yielding to the user if they start scrolling while it loads.
+      const scrollRoot = document.scrollingElement;
+      while (restoreTop && hasMore && !controller.signal.aborted &&
+        scrollRoot.scrollHeight - scrollRoot.clientHeight < restoreTop &&
+        !document.body.classList.contains("preview-open")) {
+        const previousOffset = nextBatchStart;
+        await loadNextBatch().catch(handleBackgroundLoadError);
+        if (nextBatchStart <= previousOffset) break;
+      }
+      if (restoreTop && !controller.signal.aborted) {
+        if (!document.body.classList.contains("preview-open")) {
+          window.scrollTo({ top: restoreTop, behavior: "instant" });
+        }
+        finishRestoringScroll();
+        requestNextBatchIfNeeded();
+      }
     } catch (error) {
       teardownInfiniteLoading();
       if (

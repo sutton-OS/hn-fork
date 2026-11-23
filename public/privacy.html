@@ -4,15 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="no-referrer" />
-    <meta name="theme-color" content="" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121212" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8f7f4" />
     <meta
       name="description"
       content="Privacy policy for HNx — what we collect (almost nothing) and how the client stays first-party."
     />
     <title>Privacy — HNx</title>
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2" />
-    <script src="./theme-init.js?v=36"></script>
-    <link rel="stylesheet" href="./styles.css?v=36" />
+    <script src="./theme-init.js?v=39"></script>
+    <link rel="stylesheet" href="./styles.css?v=37" />
   </head>
   <body class="privacy-page">
     <main class="privacy-shell">
@@ -44,18 +46,18 @@
         </p>
 
         <h2>What we collect</h2>
-        <p><strong>Nothing.</strong></p>
+        <p>Optional alerts store only your push endpoint, its delivery keys, and your rules as personal data, and “Delete all my alerts” removes them.</p>
         <ul>
           <li><strong>No accounts.</strong> There is nothing to sign up for.</li>
           <li><strong>No analytics or ads.</strong> No trackers, pixels, or marketing SDKs.</li>
-          <li><strong>No third-party scripts in your browser.</strong> Fonts and libraries are self-hosted.</li>
+          <li><strong>Self-hosted app code.</strong> HNx serves its own fonts and libraries. A live article preview can run the publisher’s scripts inside its frame.</li>
           <li>
             <strong>Session-only theme.</strong> Light/dark mode is stored in
             <code>sessionStorage</code> for this tab only (so this page can match the app).
             It is not written to cookies or long-term local storage, and it clears when
-            the tab is closed. Feed choice stays in memory only. That stays on your device —
-            we never receive it.
+            the tab is closed. The same storage remembers recent article preview decisions for up to a day. Feed choice stays in memory.
           </li>
+          <li>If you dismiss the iOS install hint, this browser remembers the dismissal in <code>localStorage</code>.</li>
         </ul>
 
         <h2>No JavaScript</h2>
@@ -143,10 +145,16 @@
 
         <h2>What leaves when you open a story</h2>
         <p>
-          Links to external articles open on the destination site. Those sites (and
-          any trackers they embed) are outside HNx’s control. Outbound links use
-          <code>rel="noopener noreferrer"</code> and a strict referrer policy so we do
-          not leak this site’s path as a referrer.
+          Tapping a mobile headline sends its URL to HNx. The server checks whether the
+          publisher permits framing and can fetch a reader copy without sending your
+          cookies or credentials. Successful reader copies can stay in server memory for an hour.
+          The host briefly counts requests by IP to limit abuse.
+        </p>
+        <p>
+          A live preview connects your browser to the publisher and its embedded services.
+          They can see your IP and may use cookies under your browser’s rules.
+          Reader mode displays sanitized text and loads article images from their hosts.
+          Preview frames, article images, and outbound links send no HNx referrer.
         </p>
 
         <h2>Security measures</h2>
@@ -154,15 +162,15 @@
           <li>
             Content-Security-Policy with <code>default-src 'none'</code> and
             first-party allowlists for scripts, styles, fonts, and API calls. The
-            image allowlist also permits Google’s favicon service.
+            modern feed also allows publisher frames and HTTPS article images.
           </li>
           <li>Strict-Transport-Security, frame denial, nosniff, Permissions-Policy</li>
           <li>
             Full app: HN HTML sanitized with vendored DOMPurify before render.
             Plain HTML reader: parser-based server-side allowlist sanitizer (http(s) links only).
           </li>
-          <li>No open URL-fetch proxy endpoints</li>
-          <li>No service worker / offline cache (avoids stale or opaque client storage)</li>
+          <li>Preview endpoints limit request time, response size, and access to private network addresses.</li>
+          <li>The installable reader uses a service worker without an offline cache.</li>
         </ul>
 
         <h2>Source</h2>
@@ -171,7 +179,7 @@
           stricter, that is a welcome bug report.
         </p>
 
-        <p class="privacy-updated">Last updated: 2026-11-22</p>
+        <p class="privacy-updated">Last updated: 2026-11-23</p>
       </article>
     </main>
   </body>

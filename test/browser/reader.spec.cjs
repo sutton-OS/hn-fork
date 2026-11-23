@@ -42,6 +42,36 @@ test("feed, discussion, back navigation, and native keyboard controls", async ({
   expect(errors).toEqual([]);
 });
 
+test("only the current story has a selection highlight", async ({ page, hasTouch }) => {
+  await page.route("**/api/stories?**", route => route.fulfill({ json: {
+    stories: [{ id: 1, title: "First story" }, { id: 2, title: "Second story" }],
+    nextOffset: 2, hasMore: false,
+  } }));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const rows = page.locator(".story-list .story");
+  await expect(rows).toHaveCount(2);
+  const secondSource = rows.nth(1).locator(".story-source");
+  if (hasTouch) await secondSource.tap();
+  else await secondSource.hover();
+
+  // Check the visible accent bar, including any highlight caused by browser hover.
+  const highlightedTitles = () => rows.evaluateAll(stories => stories
+    .filter(row => getComputedStyle(row, "::before").backgroundColor !== "rgba(0, 0, 0, 0)")
+    .map(row => row.querySelector(".story-title").textContent.trim()));
+  await expect.poll(highlightedTitles).toEqual(["Second story"]);
+  if (hasTouch) {
+    await rows.first().locator(".story-source").tap();
+    await expect.poll(highlightedTitles).toEqual(["First story"]);
+    await secondSource.tap();
+    await expect.poll(highlightedTitles).toEqual(["Second story"]);
+  }
+  await page.keyboard.press("g");
+  await expect.poll(highlightedTitles).toEqual(["First story"]);
+  await rows.nth(1).locator(".story-comments-link").focus();
+  await expect.poll(highlightedTitles).toEqual(["Second story"]);
+});
+
 test("nested replies paginate once and deduplicate shifting pages", async ({ page }) => {
   const offsets = [];
   await page.route("**/api/thread?id=2&**", async route => {
@@ -55,15 +85,28 @@ test("nested replies paginate once and deduplicate shifting pages", async ({ pag
   });
   await page.goto("/#/item/1");
   const parent = page.locator('.comment[data-comment-id="2"]');
+  const toggle = parent.locator(':scope > .comment-header [data-action="toggle-comment"]');
   const replies = parent.locator(':scope > .comment-header [data-action="load-replies"]');
+  await toggle.click();
+  await expect(replies).toHaveAttribute("aria-expanded", "false");
   await replies.click();
   await expect(parent.locator(".comment")).toHaveCount(40);
+  await expect(parent.locator(".comment").first()).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-label", "Collapse comment");
+  await expect(replies).toHaveAttribute("aria-expanded", "true");
   const more = parent.locator('[data-action="load-more-server"]');
   await more.click();
   await expect(parent.locator(".comment")).toHaveCount(60);
   // The header toggles visibility; it must never use a separate server cursor.
   await replies.click();
   await expect(parent).toHaveClass(/is-collapsed/);
+  await expect(replies).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveAttribute("aria-label", "Expand comment");
+  await expect(parent.locator(".comment").first()).toBeHidden();
+  await toggle.click();
+  await expect(replies).toHaveAttribute("aria-expanded", "true");
+  await expect(parent.locator(".comment").first()).toBeVisible();
+  await toggle.click();
   await replies.click();
   await expect(parent).not.toHaveClass(/is-collapsed/);
   expect(offsets).toEqual([0, 40]);
@@ -74,6 +117,33 @@ test("nested replies paginate once and deduplicate shifting pages", async ({ pag
   expect(offsets).toEqual([0, 40, 80]);
   const ids = await parent.locator(".comment").evaluateAll(nodes => nodes.map(node => node.dataset.commentId));
   expect(new Set(ids).size).toBe(ids.length);
+});
+
+test("loading replies respects a more recent collapse", async ({ page }) => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  await page.route("**/api/thread?id=500&**", async route => {
+    await pending;
+    await route.continue();
+  });
+  await page.goto("/#/item/1");
+  const parent = page.locator('.comment[data-comment-id="500"]');
+  const toggle = parent.locator(':scope > .comment-header [data-action="toggle-comment"]');
+  const replies = parent.locator(':scope > .comment-header [data-action="load-replies"]');
+  const child = parent.locator('.comment[data-comment-id="501"]');
+  try {
+    await replies.click();
+    await expect(replies).toBeDisabled();
+    await toggle.click();
+  } finally {
+    release();
+  }
+  await expect(child).toHaveCount(1);
+  await expect(child).toBeHidden();
+  await expect(replies).toHaveAttribute("aria-expanded", "false");
+  await replies.click();
+  await expect(child).toBeVisible();
+  await expect(replies).toHaveAttribute("aria-expanded", "true");
 });
 
 test("deep threads stop indenting and fit the viewport", async ({ page }) => {

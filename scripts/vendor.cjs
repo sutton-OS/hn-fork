@@ -22,9 +22,14 @@ for (const [source, target] of files) {
 // Vercel's CommonJS loader cannot require the ESM-only parser used by the
 // current sanitize-html package. Bundle its dependencies without downgrading.
 const lock = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
+// Only include licenses for packages actually compiled into this bundle.
+const options = { absWorkingDir: root, entryPoints: ["sanitize-html"], bundle: true,
+  platform: "node", format: "cjs", target: "node22", write: false };
+const inputs = Object.keys(buildSync({ ...options, metafile: true }).metafile.inputs);
+const included = new Set(inputs.map(file => file.match(/^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//)?.[1]));
 const notices = [];
 for (const [directory, pkg] of Object.entries(lock.packages)) {
-  if (!directory || pkg.dev) continue;
+  if (!included.has(directory)) continue;
   const packageDir = path.join(root, directory);
   const license = fs.readdirSync(packageDir).find(name => /^licen[sc]e(?:\.(?:txt|md))?$/i.test(name));
   if (!license) throw new Error(`Missing bundled dependency license: ${directory}`);
@@ -32,16 +37,10 @@ for (const [directory, pkg] of Object.entries(lock.packages)) {
   notices.push(`${directory} (${pkg.version})\n${text}`);
 }
 const bundled = buildSync({
-  absWorkingDir: root,
-  entryPoints: ["sanitize-html"],
+  ...options,
   outfile: "lib/vendor/sanitize-html.cjs",
-  bundle: true,
-  platform: "node",
-  format: "cjs",
-  target: "node22",
   legalComments: "inline",
   banner: { js: `/*! Server sanitizer dependency licenses\n${notices.join("\n\n").replace(/\*\//g, "* /")}\n*/` },
-  write: false,
 });
 for (const file of bundled.outputFiles) {
   if (process.argv.includes("--check")) {

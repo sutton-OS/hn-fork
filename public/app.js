@@ -1,16 +1,21 @@
 import { FEED_BEST, LIST_VISIBLE_REFRESH_AFTER_MS } from "./modules/config.js";
 import { normalizeFeed, isInteractiveTarget } from "./modules/utils.js";
+import { wireNotificationStories, wirePreview } from "./modules/preview-entry.js";
+import { wireAlerts } from "./modules/alerts.js";
+import { touchInput, wirePWA } from "./modules/pwa.js";
 import { parseRoute } from "./modules/routing.js";
 import { createUI } from "./modules/ui.js?v=36";
-import { createFeedView } from "./modules/feed.js?v=36";
+import { createFeedView } from "./modules/feed.js?v=39";
 import { startDiscussion } from "./modules/api.js?v=35";
 
 const app = document.getElementById("app");
 app.classList.add("shell");
+wirePreview(app);
 let currentViewController = null;
 let story = null;
 let storyModule = null;
 let currentFeed = FEED_BEST;
+const feedScrollPositions = new Map();
 let listHiddenAt = 0;
 const DOUBLE_H_MS = 320;
 let hTapTimer = null;
@@ -32,6 +37,7 @@ function classicSkinUrl() {
 }
 
 function handleClassicSkinShortcut(event) {
+  if (document.body.classList.contains("preview-open")) return;
   if (event.defaultPrevented) {
     return;
   }
@@ -91,6 +97,7 @@ function handleVisibilityChange() {
 }
 
 function refreshCurrentList() {
+  if (document.body.classList.contains("preview-open")) return;
   if (app.dataset.view !== "list") {
     return;
   }
@@ -107,7 +114,7 @@ async function handleRouteChange() {
   await renderRoute(route);
 }
 
-async function renderRoute(route = parseRoute()) {
+async function renderRoute(route = parseRoute(), scrollTop) {
   abortCurrentViewLoad();
   feed.teardownListSelection();
   app.dataset.view = "";
@@ -145,7 +152,8 @@ async function renderRoute(route = parseRoute()) {
     return;
   }
 
-  await feed.renderListPage();
+  if (scrollTop !== undefined) window.scrollTo({ top: 0, behavior: "instant" });
+  await feed.renderListPage({ scrollTop });
 }
 
 function canHandleRouteInPlace(route) {
@@ -153,11 +161,20 @@ function canHandleRouteInPlace(route) {
 }
 
 function applyFeed(feed) {
-  currentFeed = normalizeFeed(feed);
-  rerenderListForFeedChange();
+  const nextFeed = normalizeFeed(feed);
+  let scrollTop;
+  if (touchInput.matches && nextFeed !== currentFeed && app.dataset.view === "list") {
+    const panel = app.querySelector("#feed-panel");
+    if (!panel?.hasAttribute("data-restoring-scroll")) {
+      feedScrollPositions.set(currentFeed, Math.max(0, window.scrollY));
+    }
+    scrollTop = feedScrollPositions.get(nextFeed) ?? 0;
+  }
+  currentFeed = nextFeed;
+  rerenderListForFeedChange(scrollTop);
 }
 
-function rerenderListForFeedChange() {
+function rerenderListForFeedChange(scrollTop) {
   if (app.dataset.view !== "list") {
     return;
   }
@@ -165,7 +182,7 @@ function rerenderListForFeedChange() {
   if (hash && hash !== "/") {
     window.location.hash = "/";
   }
-  void renderRoute({ type: "list" });
+  void renderRoute({ type: "list" }, scrollTop);
 }
 
 function abortCurrentViewLoad() {
@@ -180,13 +197,7 @@ window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("pageshow", handlePageShow);
 document.addEventListener("visibilitychange", handleVisibilityChange);
 document.addEventListener("keydown", handleClassicSkinShortcut, true);
+wirePWA(app, refreshCurrentList);
+wireAlerts(app);
+wireNotificationStories(app);
 void handleRouteChange();
-
-// One-time cleanup for older installs that registered a service worker.
-if ("serviceWorker" in navigator) {
-  void navigator.serviceWorker.getRegistrations().then((regs) => {
-    regs.forEach((reg) => {
-      void reg.unregister();
-    });
-  });
-}

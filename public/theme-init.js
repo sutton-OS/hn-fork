@@ -15,13 +15,29 @@
 
   root.dataset.theme = preference ?? getSystemTheme();
 
+  const themeColors = [...document.querySelectorAll('meta[name="theme-color"]')].map((meta) => ({
+    meta,
+    color: meta.content,
+  }));
+  const dark = themeColors.find(({ meta }) => meta.getAttribute("media") === "(prefers-color-scheme: dark)")?.color;
+  const light = themeColors.find(({ meta }) => meta.getAttribute("media") === "(prefers-color-scheme: light)")?.color;
+
+  // Set the chrome color before paint when the session theme overrides the OS.
+  function updateThemeColors() {
+    const selectedColor = root.dataset.theme === "light" ? light : dark;
+    for (const { meta, color } of themeColors) {
+      meta.content = (preference && selectedColor) || color;
+    }
+  }
+
+  updateThemeColors();
+
   function updateControls() {
     const isLight = root.dataset.theme === "light";
     document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
       button.setAttribute("aria-pressed", String(isLight));
     });
-    const color = getComputedStyle(root).getPropertyValue("--bg").trim();
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", color);
+    updateThemeColors();
   }
 
   document.addEventListener("DOMContentLoaded", updateControls, { once: true });

@@ -79,6 +79,12 @@ export function createUI({ app, getCurrentFeed, setFeed }) {
       <header class="topbar">
         <div class="topbar-start">${leftContent}</div>
         <div class="topbar-actions">
+          <button class="alerts-toggle" type="button" aria-label="Alerts" aria-haspopup="dialog" data-alerts>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>
+            </svg>
+          </button>
           <button
             class="theme-toggle"
             type="button"

@@ -16,6 +16,7 @@ const {
   normalizeSkin,
   plainFeedPath,
   classicFeedPath,
+  withTheme,
   renderFeedPicker,
   renderThemeLinks,
   renderLayout,
@@ -55,13 +56,10 @@ module.exports = async function handler(req, res) {
   );
   const cacheFeed = isFirstFeedPage(req.query, { html: true });
 
-  const currentPath = isClassic
-    ? offset > 0
-      ? `/classic/${feed}?offset=${offset}`
-      : `/classic/${feed}`
-    : offset > 0
-      ? `/plain/${feed}?offset=${offset}`
-      : `/plain/${feed}`;
+  const pageQuery = new URLSearchParams();
+  if (offset > 0) pageQuery.set("offset", offset);
+  if (limit !== UPSTREAM.storiesDefaultLimit) pageQuery.set("limit", limit);
+  const currentPath = `/${skin}/${feed}` + (pageQuery.size ? `?${pageQuery}` : "");
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM.timeoutMs);
@@ -186,7 +184,7 @@ ${moreHtml}
           body: `
 ${renderClassicNav(feed)}
 <p>${escapeHTML(message)}</p>
-<p><a href="${escapeHTML(classicFeedPath(feed))}">Retry</a></p>
+<p><a href="${escapeHTML(currentPath)}">Retry</a></p>
 `,
         }),
       );
@@ -208,7 +206,7 @@ ${renderClassicNav(feed)}
               <div class="topbar-actions">${renderThemeLinks(theme, currentPath)}</div>
             </header>
             <p class="status">${escapeHTML(message)}</p>
-            <p><a class="btn" href="${escapeHTML(plainFeedPath(feed, theme))}">Retry</a></p>
+            <p><a class="btn" href="${escapeHTML(withTheme(currentPath, theme))}">Retry</a></p>
           </section>
         `,
       }),

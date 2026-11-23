@@ -8,5 +8,5 @@ function checkDirectory(dir) {
     else if (/\.(?:js|mjs|cjs)$/.test(file)) execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
   }
 }
-for (const dir of ["api", "lib", "public", "scripts", "test"]) checkDirectory(dir);
+for (const dir of ["api", "lib", "public", "scheduler", "scripts", "test"]) checkDirectory(dir);
 execFileSync(process.execPath, ["scripts/vendor.cjs", "--check"], { stdio: "inherit" });

@@ -142,6 +142,7 @@ export function createCommentsView({ app }) {
     toggleButton.className = "comment-toggle";
     toggleButton.dataset.action = "toggle-comment";
     toggleButton.setAttribute("aria-label", "Collapse comment");
+    toggleButton.setAttribute("aria-expanded", "true");
     toggleButton.title = "Collapse";
     toggleButton.innerHTML =
       '<svg class="comment-chevron" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -179,6 +180,7 @@ export function createCommentsView({ app }) {
       repliesButton.dataset.commentId = String(item.id);
       repliesButton.textContent =
         item.replyCount === 1 ? "1 reply" : `${item.replyCount} replies`;
+      repliesButton.setAttribute("aria-expanded", "false");
       repliesButton.setAttribute(
         "aria-label",
         `Show ${item.replyCount} ${item.replyCount === 1 ? "reply" : "replies"}`,
@@ -379,6 +381,21 @@ export function createCommentsView({ app }) {
     }
   }
 
+  function setCommentCollapsed(state, comment, collapsed) {
+    comment.classList.toggle("is-collapsed", collapsed);
+    const toggle = comment.querySelector(":scope > .comment-header .comment-toggle");
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.setAttribute("aria-label", collapsed ? "Expand comment" : "Collapse comment");
+    toggle.title = collapsed ? "Expand" : "Collapse";
+
+    const model = state.replyModels.get(Number(comment.dataset.commentId));
+    if (model?.loaded) {
+      model.buttonEl.classList.toggle("is-open", !collapsed);
+      model.buttonEl.setAttribute("aria-expanded", String(!collapsed));
+      model.buttonEl.setAttribute("aria-label", collapsed ? "Expand replies" : "Collapse replies");
+    }
+  }
+
   async function fetchAndMountReplies(state, model) {
     if (!model || model.loaded || model.loading || state.signal.aborted) return;
     model.loading = true;
@@ -398,10 +415,9 @@ export function createCommentsView({ app }) {
         serverHasMore: Boolean(data.hasMore),
       });
       model.loaded = true;
-      model.buttonEl.classList.add("is-open");
       model.buttonEl.textContent = model.replyCount === 1 ? "1 reply" : `${model.replyCount} replies`;
-      model.buttonEl.setAttribute("aria-expanded", "true");
-      model.buttonEl.setAttribute("aria-label", "Collapse replies");
+      const comment = model.container.parentElement;
+      setCommentCollapsed(state, comment, comment.classList.contains("is-collapsed"));
     } catch (error) {
       if (!isAbortError(error) && !state.signal.aborted) {
         model.buttonEl.textContent = "Retry replies";
@@ -678,13 +694,13 @@ export function createCommentsView({ app }) {
         if (!model) {
           return;
         }
+        const comment = actionEl.closest(".comment");
+        const collapsed = comment.classList.contains("is-collapsed");
         if (model.loaded) {
-          const comment = actionEl.closest(".comment");
-          const collapsed = comment.classList.toggle("is-collapsed");
-          actionEl.setAttribute("aria-expanded", String(!collapsed));
-          actionEl.setAttribute("aria-label", collapsed ? "Expand replies" : "Collapse replies");
+          setCommentCollapsed(state, comment, !collapsed);
           return;
         }
+        if (collapsed) setCommentCollapsed(state, comment, false);
         void fetchAndMountReplies(state, model);
         return;
       }
@@ -694,10 +710,7 @@ export function createCommentsView({ app }) {
         if (!comment) {
           return;
         }
-        const isCollapsed = comment.classList.toggle("is-collapsed");
-        const nextLabel = isCollapsed ? "Expand comment" : "Collapse comment";
-        actionEl.setAttribute("aria-label", nextLabel);
-        actionEl.title = isCollapsed ? "Expand" : "Collapse";
+        setCommentCollapsed(state, comment, !comment.classList.contains("is-collapsed"));
       }
     };
 

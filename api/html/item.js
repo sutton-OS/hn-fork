@@ -144,6 +144,7 @@ ${renderClassicNav("best")}
       payload.title || (isComment ? `Comment ${itemId}` : "Untitled");
     const safeUrl = getSafeUrl(payload.url);
     const domain = extractDomain(payload.url) || "";
+    const itemText = payload.deleted ? "[deleted]" : payload.dead ? "[dead]" : sanitizeHNHTML(payload.text);
 
     const comments = Array.isArray(payload.comments) ? payload.comments : [];
 
@@ -161,8 +162,8 @@ ${renderClassicNav("best")}
         : domain
           ? `<br>${escapeHTML(domain)}`
           : "";
-      const opText = payload.text
-        ? `<div class="op">${sanitizeHNHTML(payload.text)}</div>`
+      const opText = itemText
+        ? `<div class="op">${itemText}</div>`
         : "";
       const metaBits = [
         payload.by ? `by ${escapeHTML(payload.by)}` : "",
@@ -230,8 +231,8 @@ ${moreHtml}
         ? `<span class="story-url">${escapeHTML(domain)}</span>`
         : "";
 
-    const opText = payload.text
-      ? `<div class="story-text">${sanitizeHNHTML(payload.text)}</div>`
+    const opText = itemText
+      ? `<div class="story-text">${itemText}</div>`
       : "";
 
     const commentsHtml = comments.length

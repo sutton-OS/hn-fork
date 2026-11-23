@@ -16,6 +16,8 @@ global.fetch = async url => ({
   json: async () => url.endsWith("stories.json") ? [1] : items.get(Number(url.match(/\/item\/(\d+)\.json$/)?.[1])) || null,
 });
 const handlers = {
+  "/api/embeddable": require("../../api/embeddable"),
+  "/api/reader": require("../../api/reader"),
   "/api/stories": require("../../api/stories"),
   "/api/thread": require("../../api/thread"),
   "/api/item": require("../../api/item"),
