@@ -8,7 +8,7 @@ const LOAD_AHEAD_PX = 160;
 export function createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView }) {
   let selectedStoryIndex = -1;
   let listKeyboardHandler = null;
-  const { topbar, wireThemeToggle, wireFeedToggleButtons } = ui;
+  const { topbar, wireFeedToggleButtons } = ui;
 
   function setSelectedStoryElement(storyEl, { scroll = false } = {}) {
     if (!storyEl) {
@@ -277,7 +277,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
   }
 
   function createLoadingRow(index, message = "loading...") {
-    const row = document.createElement("article");
+    const row = document.createElement("li");
     row.className = "story";
     row.dataset.storyRank = String(index);
     row.innerHTML = `
@@ -289,13 +289,13 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
 
   function renderFailedStoryRow(id, index) {
     return `
-      <article class="story" data-story-rank="${index}">
+      <li class="story" data-story-rank="${index}">
         <div class="story-title"><span class="story-title-text">failed to load</span></div>
         <div class="story-meta">
           <span>item ${id}</span>
           <span><button class="btn" type="button" data-retry-id="${id}" data-retry-rank="${index}">retry</button></span>
         </div>
-      </article>
+      </li>
     `;
   }
 
@@ -321,17 +321,19 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       app.dataset.view = "list";
       app.innerHTML = `
         <section class="list-pane">
-          ${topbar("")}
-          <section class="story-list"></section>
-          <p class="status" data-list-status hidden></p>
-          <button class="btn" type="button" data-list-retry hidden>Retry loading stories</button>
-          <div data-list-sentinel aria-hidden="true"></div>
+          ${topbar()}
+          <div id="feed-panel" role="tabpanel" aria-labelledby="feed-tab-${getCurrentFeed()}" aria-busy="true">
+            <ul class="story-list" role="list"></ul>
+            <p class="status" data-list-status hidden></p>
+            <button class="btn" type="button" data-list-retry hidden>Retry loading stories</button>
+            <div data-list-sentinel aria-hidden="true"></div>
+          </div>
         </section>
       `;
-      wireThemeToggle();
       wireFeedToggleButtons();
       wireDiscussionPrefetch(app);
 
+      const panel = app.querySelector("#feed-panel");
       const listEl = app.querySelector(".story-list");
       const listStatus = app.querySelector("[data-list-status]");
       const retryPageButton = app.querySelector("[data-list-retry]");
@@ -341,6 +343,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       }
 
       initializeListSelection(listEl);
+      listEl.addEventListener("error", (event) => {
+        if (event.target.matches(".story-favicon")) event.target.hidden = true;
+      }, true);
 
       const setListStatus = (value = "") => {
         const next = (value || "").trim();
@@ -370,7 +375,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           return;
         }
 
-        const discussionLink = event.target.closest("a.meta-time");
+        const discussionLink = event.target.closest("a.story-comments-link");
         if (discussionLink && listEl.contains(discussionLink)) {
           const storyRow = discussionLink.closest(".story");
           if (storyRow) {
@@ -595,6 +600,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       window.addEventListener("scroll", scrollHandler, { passive: true });
 
       await loadNextBatch().catch(handleBackgroundLoadError);
+      panel.removeAttribute("aria-busy");
     } catch (error) {
       teardownInfiniteLoading();
       if (
@@ -606,11 +612,12 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       }
       app.innerHTML = `
         <section class="list-pane">
-          ${topbar("")}
-          <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
+          ${topbar()}
+          <div id="feed-panel" role="tabpanel" aria-labelledby="feed-tab-${getCurrentFeed()}">
+            <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
+          </div>
         </section>
       `;
-      wireThemeToggle();
       wireFeedToggleButtons();
     }
   }
@@ -621,33 +628,42 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     }
 
     const storyId = Number(story.id);
-    const domain = story.domain || getDomain(story.url);
+    const domain = (story.domain || getDomain(story.url) || "news.ycombinator.com").toLowerCase();
     const safeUrl = getSafeUrl(story.url);
     const discussionPath = Number.isInteger(storyId) && storyId > 0 ? `#/item/${storyId}` : "#/";
     const storyUrl = safeUrl || discussionPath;
     const storyTitleRaw = story.title || "Untitled";
     const storyTitle = escapeHTML(storyTitleRaw);
-    const escapedStoryDomain = escapeHTML(domain);
     const escapedStoryUrl = escapeHTML(storyUrl);
     const isExternal = Boolean(safeUrl);
+    const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+    const age = `${timeAgo(story.time)} ago`;
     const titleContent = `
       <a
         href="${escapedStoryUrl}"
         ${isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}
         data-story-id="${storyId}"
-      ><span class="story-title-text">${storyTitle}</span></a>
+      >${storyTitle}</a>
     `;
 
     return `
-      <article class="story" data-story-rank="${index}" data-story-id="${storyId}">
-        <div class="story-title">
-          ${titleContent}
-          ${domain ? `<span class="domain">(${escapedStoryDomain})</span>` : ""}
-        </div>
+      <li class="story" data-story-rank="${index}" data-story-id="${storyId}">
+        <div class="story-title">${titleContent}</div>
         <div class="story-meta">
-          <a class="meta-time" href="${escapeHTML(discussionPath)}">${timeAgo(story.time)} ago</a>
+          <span class="story-source">
+            <span class="favicon-slot" aria-hidden="true">
+              <img class="story-favicon" src="${escapeHTML(faviconUrl)}" width="16" height="16"
+                alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+            </span>
+            <span class="domain">${escapeHTML(domain)}</span>
+          </span>
+          <span class="meta-part"><span class="meta-divider" aria-hidden="true">·</span> ${age}</span>
+          <span class="meta-part">
+            <span class="meta-divider" aria-hidden="true">·</span>
+            <a class="story-comments-link" href="${escapeHTML(discussionPath)}" aria-label="comments on ${storyTitle}">comments</a>
+          </span>
         </div>
-      </article>
+      </li>
     `;
   }
 

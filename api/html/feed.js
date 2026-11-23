@@ -23,7 +23,7 @@ const {
   renderClassicNav,
   classicStoryListItem,
   sendHTML,
-  storyListArticle,
+  renderStoryListItem,
   escapeHTML,
 } = require("../../lib/html");
 
@@ -128,7 +128,7 @@ ${moreHtml}
     }
 
     const listHtml = stories.length
-      ? stories.map((story) => storyListArticle(story, theme)).join("")
+      ? `<ul class="story-list" role="list">${stories.map((story) => renderStoryListItem(story, theme)).join("")}</ul>`
       : `<p class="status">No stories on this page.</p>`;
 
     const moreHtml = hasMore
@@ -141,9 +141,9 @@ ${moreHtml}
       <section class="list-pane">
         <header class="topbar">
           <div class="topbar-start">
-            <div class="feed-picker" role="group" aria-label="Story feed">
+            <nav class="feed-picker" aria-label="Story feed">
               ${renderFeedPicker(feed, theme)}
-            </div>
+            </nav>
           </div>
           <div class="topbar-actions">
             ${renderThemeLinks(theme, currentPath)}
@@ -155,9 +155,7 @@ ${moreHtml}
           ·
           <a href="${escapeHTML(classicFeedPath(feed))}">Classic</a>
         </p>
-        <section class="story-list">
-          ${listHtml}
-        </section>
+        ${listHtml}
         ${moreHtml}
       </section>
     `;
@@ -205,7 +203,7 @@ ${renderClassicNav(feed)}
           <section class="list-pane">
             <header class="topbar">
               <div class="topbar-start">
-                <div class="feed-picker">${renderFeedPicker(feed, theme)}</div>
+                <nav class="feed-picker" aria-label="Story feed">${renderFeedPicker(feed, theme)}</nav>
               </div>
               <div class="topbar-actions">${renderThemeLinks(theme, currentPath)}</div>
             </header>

@@ -1,20 +1,33 @@
 const { test, expect } = require("@playwright/test");
 
+test.beforeEach(async ({ context }) => {
+  await context.route("https://www.google.com/s2/favicons?**", route => route.abort());
+});
+
 test("feed, discussion, back navigation, and native keyboard controls", async ({ page }) => {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/");
   await expect(page.locator(".story-list .story")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Retry loading stories" })).toBeHidden();
-  const theme = page.getByRole("switch");
+  const theme = page.getByRole("button", { name: "Toggle theme" });
   await theme.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  const top = page.getByRole("button", { name: "Feed: Top" });
-  await top.focus();
+  await expect(theme).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("tab", { name: "Best" }).focus();
+  await page.keyboard.press("ArrowRight");
+  const top = page.getByRole("tab", { name: "Top" });
+  await expect(top).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("button", { name: "Feed: Top" })).toHaveAttribute("aria-pressed", "true");
-  const discussion = page.locator("a.meta-time");
+  await expect(top).toHaveAttribute("aria-selected", "true");
+  await expect(top).toBeFocused();
+  const metadata = page.locator(".story-list .story-meta");
+  const discussion = metadata.getByRole("link", { name: "comments on Test discussion" });
+  await expect(discussion).toHaveText("comments");
+  await expect(metadata).not.toContainText(/\b\d+ (?:pts|comments?)\b/);
+  await expect(metadata.getByRole("link")).toHaveCount(1);
   await discussion.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/item\/1$/);
@@ -131,6 +144,13 @@ test("plain and classic pages work with scripts disabled and enforce headers", a
     await expect(page.locator("body")).toContainText(route.includes("item") ? "Many replies" : "Test discussion");
     await expect(page.locator("img, script")).toHaveCount(0);
     await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /favicon-32x32/);
+    if (route === "/plain") {
+      const metadata = page.locator(".story-list .story-meta");
+      const discussion = metadata.getByRole("link", { name: "comments on Test discussion" });
+      await expect(discussion).toHaveText("comments");
+      await expect(discussion).toHaveAttribute("href", "/plain/item/1?theme=dark");
+      await expect(metadata).not.toContainText(/\b\d+ (?:pts|comments?)\b/);
+    }
   }
   await context.close();
 });
@@ -148,7 +168,7 @@ test("prefetched metadata cannot overwrite fresh details and revisits refresh co
     await route.fulfill({ json: { id: 1, title: "Old prefetched title", comments: [{ id: 200 + revision, text: `Revision ${revision}`, replyCount: 0 }], nextOffset: 1, total: 1, hasMore: false } });
   });
   await page.goto("/");
-  await page.locator("a.meta-time").dispatchEvent("pointerover", { pointerType: "mouse" });
+  await page.locator("a.story-comments-link").dispatchEvent("pointerover", { pointerType: "mouse" });
   await started;
   await page.evaluate(() => { location.hash = "/item/1"; });
   await expect(page.locator(".story-detail .story-title")).toHaveText("Fresh title");
@@ -225,7 +245,7 @@ test("long comments clamp independently and expand on demand", async ({ page }) 
 test("hover waits for intent and leaving cancels the in-flight prefetch", async ({ page }) => {
   await page.clock.install();
   await page.goto("/");
-  const link = page.locator("a.meta-time");
+  const link = page.locator("a.story-comments-link");
   await expect(link).toBeVisible();
   const lookups = [];
   page.on("request", request => {

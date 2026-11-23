@@ -5,7 +5,7 @@ import { sanitizeHNHTML } from "./sanitize.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError } from "./utils.js";
 
 export function createStoryView({ app, ui }) {
-  const { topbar, wireThemeToggle, wireFeedToggleButtons } = ui;
+  const { topbar } = ui;
   const comments = createCommentsView({ app });
   const { createCommentRenderState, wireCommentActions, initializeStoryKeyboard, teardownStoryKeyboard, mountChildList, renderRootMoreFooter, updateCommentStatus, selectCommentIndex } = comments;
 
@@ -89,8 +89,6 @@ export function createStoryView({ app, ui }) {
           <p class="status">Invalid story id.</p>
         </section>
       `;
-      wireThemeToggle();
-      wireFeedToggleButtons();
       return;
     }
 
@@ -113,8 +111,6 @@ export function createStoryView({ app, ui }) {
         </section>
       </section>
     `;
-    wireThemeToggle();
-    wireFeedToggleButtons();
 
     let detailSlot = app.querySelector("[data-story-shell]");
     const commentsSection = app.querySelector(".comments");

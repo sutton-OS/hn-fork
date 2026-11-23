@@ -6,7 +6,8 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 
 - **No accounts, cookies, analytics, or ads**
 - **Self-hosted fonts** (no Google Fonts)
-- **Browser → first party only** for HN data (`/api/*`); no client calls to Firebase/Algolia/Google
+- **Browser → first party only** for HN data (`/api/*`)
+- **Publisher favicons** in the full app come from Google’s favicon service with no referrer
 - **Vendored DOMPurify** for comment/HTML sanitization (no CDN)
 - **Strict security headers** (CSP, HSTS, Referrer-Policy, Permissions-Policy, COOP/CORP)
 - **No open URL-fetch proxy**

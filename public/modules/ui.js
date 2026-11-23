@@ -1,134 +1,104 @@
-import { FEEDS, FEED_TOP, FEED_NEW, THEME_STORAGE_KEY } from "./config.js";
-import { normalizeFeed } from "./utils.js";
+import { FEEDS } from "./config.js";
+
+const feedLabels = { best: "Best", top: "Top", new: "New" };
 
 export function createUI({ app, getCurrentFeed, setFeed }) {
-  function readStoredTheme() {
-    try {
-      const stored = sessionStorage.getItem(THEME_STORAGE_KEY);
-      return stored === "light" ? "light" : "dark";
-    } catch {
-      return "dark";
-    }
-  }
-
-  function updateThemeToggle() {
-    const isDark = document.documentElement.dataset.theme === "dark";
-    document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-      button.setAttribute("aria-checked", isDark ? "true" : "false");
-      button.setAttribute("aria-label", isDark ? "Use light mode" : "Use dark mode");
-    });
-  }
-
-  function applyTheme(theme) {
-    const nextTheme = theme === "light" ? "light" : "dark";
-    document.documentElement.dataset.theme = nextTheme;
-    document.documentElement.style.colorScheme = nextTheme;
-    document
-      .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", nextTheme === "dark" ? "#181715" : "#ffffff");
-    try {
-      sessionStorage.setItem(THEME_STORAGE_KEY, nextTheme);
-    } catch {
-      /* ignore quota / private mode */
-    }
-    updateThemeToggle();
-  }
-
-  function wireThemeToggle(root = app) {
-    root.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-      if (button.dataset.themeWired) {
-        return;
-      }
-      button.dataset.themeWired = "true";
-      button.addEventListener("click", () => {
-        const nextTheme =
-          document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-        applyTheme(nextTheme);
-      });
-    });
-    updateThemeToggle();
-  }
-
-  function getFeedLabel(feed = getCurrentFeed()) {
-    const normalized = normalizeFeed(feed);
-    if (normalized === FEED_TOP) {
-      return "Top";
-    }
-    if (normalized === FEED_NEW) {
-      return "New";
-    }
-    return "Best";
-  }
-
-  function getFeedPickerButton(feed) {
-    const normalized = normalizeFeed(feed);
-    const isActive = normalized === getCurrentFeed();
+  function getFeedTab(feed) {
+    const isActive = feed === getCurrentFeed();
     return `
       <button
-        class="btn feed-option${isActive ? " is-active" : ""}"
+        class="feed-option"
         type="button"
-        data-feed-option="${normalized}"
-        aria-pressed="${isActive ? "true" : "false"}"
-        aria-label="Feed: ${getFeedLabel(normalized)}"
-      >
-        <span class="feed-option-label">${getFeedLabel(normalized)}</span>
-      </button>
+        role="tab"
+        id="feed-tab-${feed}"
+        data-feed-option="${feed}"
+        aria-controls="feed-panel"
+        aria-selected="${isActive}"
+        tabindex="${isActive ? 0 : -1}"
+      >${feedLabels[feed]}</button>
     `;
   }
 
-  function updateFeedToggleLabels() {
-    const normalized = normalizeFeed(getCurrentFeed());
-    app.querySelectorAll("[data-feed-picker]").forEach((picker) => {
-      picker.querySelectorAll("[data-feed-option]").forEach((button) => {
-        const optionFeed = normalizeFeed(button.getAttribute("data-feed-option"));
-        const isActive = optionFeed === normalized;
-        button.classList.toggle("is-active", isActive);
-        button.setAttribute("aria-pressed", isActive ? "true" : "false");
-      });
-    });
-  }
-
   function wireFeedToggleButtons(root = app) {
-    root.querySelectorAll("[data-feed-option]").forEach((button) => {
-      if (button.dataset.feedWired) {
-        return;
-      }
-      button.dataset.feedWired = "true";
-      button.addEventListener("click", () => {
-        const next = button.getAttribute("data-feed-option");
-        setFeed(next);
-      });
+    const picker = root.querySelector("[data-feed-picker]");
+    if (!picker) return;
+
+    picker.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-feed-option]");
+      if (!tab) return;
+      const hadFocus = document.activeElement === tab;
+      setFeed(tab.dataset.feedOption);
+      if (hadFocus) document.getElementById(tab.id)?.focus({ preventScroll: true });
     });
-    updateFeedToggleLabels();
+
+    picker.addEventListener("keydown", (event) => {
+      const tabs = Array.from(picker.querySelectorAll("[role=tab]"));
+      const index = tabs.indexOf(event.target);
+      if (index < 0 || event.altKey || event.ctrlKey || event.metaKey) return;
+
+      let next;
+      switch (event.key) {
+        case "ArrowLeft":
+          next = (index + tabs.length - 1) % tabs.length;
+          break;
+        case "ArrowRight":
+          next = (index + 1) % tabs.length;
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = tabs.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      tabs[index].tabIndex = -1;
+      tabs[next].tabIndex = 0;
+      tabs[next].focus();
+    });
+
+    picker.addEventListener("focusout", (event) => {
+      if (picker.contains(event.relatedTarget)) return;
+      const selectedTab = picker.querySelector('[aria-selected="true"]');
+      event.target.tabIndex = -1;
+      selectedTab.tabIndex = 0;
+    });
   }
 
-  function topbar(content) {
-    const leftContent = (content ?? "").trim();
-    // List: feed picker on the left. Story/comments: back replaces the feeds.
-    const startInner = leftContent
-      ? leftContent
-      : `<div class="feed-picker" role="group" aria-label="Story feed" data-feed-picker>
-            ${FEEDS.map((feed) => getFeedPickerButton(feed)).join("")}
-          </div>`;
+  function topbar(content = "") {
+    const leftContent = content.trim() || `
+      <div class="feed-picker" role="tablist" aria-label="Story feed" data-feed-picker>
+        ${FEEDS.map(getFeedTab).join("")}
+      </div>
+    `;
 
     return `
       <header class="topbar">
-        <div class="topbar-start">
-          ${startInner}
-        </div>
+        <div class="topbar-start">${leftContent}</div>
         <div class="topbar-actions">
           <button
             class="theme-toggle"
             type="button"
-            role="switch"
-            aria-checked="false"
-            aria-label="Use dark mode"
+            aria-label="Toggle theme"
+            aria-pressed="${document.documentElement.dataset.theme === "light"}"
             data-theme-toggle
-          ></button>
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path class="theme-moon" d="M20.9 13.4A9 9 0 0 1 10.6 3.1a9 9 0 1 0 10.3 10.3Z"/>
+              <g class="theme-sun">
+                <circle cx="12" cy="12" r="4"/>
+                <path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4"/>
+              </g>
+            </svg>
+          </button>
         </div>
       </header>
     `;
   }
 
-  return { readStoredTheme, applyTheme, wireThemeToggle, wireFeedToggleButtons, topbar };
+  return { wireFeedToggleButtons, topbar };
 }

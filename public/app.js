@@ -1,8 +1,8 @@
 import { FEED_BEST, LIST_VISIBLE_REFRESH_AFTER_MS } from "./modules/config.js";
 import { normalizeFeed, isInteractiveTarget } from "./modules/utils.js";
 import { parseRoute } from "./modules/routing.js";
-import { createUI } from "./modules/ui.js";
-import { createFeedView } from "./modules/feed.js?v=35";
+import { createUI } from "./modules/ui.js?v=36";
+import { createFeedView } from "./modules/feed.js?v=36";
 import { startDiscussion } from "./modules/api.js?v=35";
 
 const app = document.getElementById("app");
@@ -120,7 +120,7 @@ async function renderRoute(route = parseRoute()) {
     const discussion = validId ? startDiscussion(route.id, { signal: controller.signal }) : null;
 
     try {
-      storyModule ??= import("./modules/story.js?v=35").catch((error) => {
+      storyModule ??= import("./modules/story.js?v=36").catch((error) => {
         storyModule = null;
         throw error;
       });
@@ -138,7 +138,6 @@ async function renderRoute(route = parseRoute()) {
           <button class="btn" type="button" data-story-retry>Retry loading discussion</button>
         </section>
       `;
-      ui.wireThemeToggle();
       app.querySelector("[data-story-retry]").addEventListener("click", () => {
         void renderRoute(route);
       }, { once: true });
@@ -177,7 +176,6 @@ function abortCurrentViewLoad() {
   story?.teardownStoryKeyboard();
 }
 
-ui.applyTheme(ui.readStoredTheme());
 window.addEventListener("hashchange", handleRouteChange);
 window.addEventListener("pageshow", handlePageShow);
 document.addEventListener("visibilitychange", handleVisibilityChange);

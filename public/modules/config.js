@@ -18,5 +18,3 @@ export const FEEDS = [FEED_BEST, FEED_TOP, FEED_NEW];
 export const LIST_VISIBLE_REFRESH_AFTER_MS = 60 * 1000;
 export const THREAD_PREFETCH_MAX = 24;
 export const THREAD_PREFETCH_TTL_MS = 30_000;
-/** Session-only theme key (survives privacy page navigation; clears with the tab). */
-export const THEME_STORAGE_KEY = "hnx-theme";
