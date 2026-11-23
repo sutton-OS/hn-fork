@@ -208,10 +208,12 @@ iframe {
 
 @supports (background: color-mix(in srgb, currentColor, transparent)) and
   ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
-  .topbar {
-    background: color-mix(in srgb, var(--bg) 80%, transparent);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
+  @media (pointer: fine) {
+    .topbar {
+      background: color-mix(in srgb, var(--bg) 80%, transparent);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+    }
   }
 }
 
@@ -225,6 +227,12 @@ iframe {
 
 .feed-picker {
   gap: 20px;
+}
+
+@media (max-width: 360px) {
+  .feed-picker {
+    gap: 12px;
+  }
 }
 
 .topbar-actions {

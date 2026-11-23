@@ -1,5 +1,6 @@
 import { PAGE_SIZE, INITIAL_PAGE_SIZE, FEED_SAVED } from "./config.js";
 import { getStories, getItem, wireDiscussionPrefetch } from "./api.js?v=41";
+import { touchInput } from "./pwa.js";
 import { navigateTo } from "./routing.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError, isInteractiveTarget } from "./utils.js";
 
@@ -7,6 +8,7 @@ const LOAD_AHEAD_PX = 160;
 
 export function createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView, saved, savedView }) {
   let selectedStoryIndex = -1;
+  let showListSelection = false;
   let listKeyboardHandler = null;
   const { topbar, wireFeedToggleButtons } = ui;
 
@@ -16,10 +18,11 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     }
     const stories = getListStoryElements();
     const nextIndex = stories.indexOf(storyEl);
-    if (nextIndex < 0 || nextIndex === selectedStoryIndex) {
+    if (nextIndex < 0 || (nextIndex === selectedStoryIndex && showListSelection)) {
       return;
     }
     selectedStoryIndex = nextIndex;
+    showListSelection = true;
     applyListSelection();
   }
 
@@ -53,7 +56,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     clampSelectedStoryIndex(stories);
 
     stories.forEach((story, index) => {
-      story.classList.toggle("is-selected", index === selectedStoryIndex);
+      story.classList.toggle("is-selected", showListSelection && index === selectedStoryIndex);
     });
 
     if (scroll && selectedStoryIndex >= 0) {
@@ -73,6 +76,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
 
     const clamped = Math.max(0, Math.min(nextIndex, stories.length - 1));
     selectedStoryIndex = clamped;
+    showListSelection = true;
     applyListSelection({ scroll });
   }
 
@@ -240,6 +244,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
   function initializeListSelection(listEl) {
     const stories = Array.from(listEl.querySelectorAll(".story"));
     selectedStoryIndex = stories.length ? 0 : -1;
+    showListSelection = !touchInput.matches;
     applyListSelection({ scroll: false });
 
     if (!listEl.dataset.selectionWired) {

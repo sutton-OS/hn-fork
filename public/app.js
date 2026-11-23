@@ -5,7 +5,7 @@ import { wireAlerts } from "./modules/alerts.js";
 import { touchInput, wirePWA } from "./modules/pwa.js";
 import { parseRoute } from "./modules/routing.js";
 import { createUI } from "./modules/ui.js?v=41";
-import { createFeedView } from "./modules/feed.js?v=41";
+import { createFeedView } from "./modules/feed.js?v=42";
 import { startDiscussion } from "./modules/api.js?v=41";
 
 import { createSavedStories } from "./modules/saved.js";

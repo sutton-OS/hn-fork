@@ -57,7 +57,7 @@ test.describe("PWA installation", () => {
     }
     expect((await page.request.get("/sw.js")).headers()["cache-control"]).toBe("no-cache");
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toMatch(/\/sw\.js$/);
-    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v2"]);
+    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v3"]);
     if (browserName === "chromium") {
       const devtools = await page.context().newCDPSession(page);
       expect((await devtools.send("Page.getAppManifest")).errors).toEqual([]);
@@ -66,19 +66,25 @@ test.describe("PWA installation", () => {
   });
 });
 
-test("layout fits 360, 768 and 1440px and the sticky header respects safe areas", async ({ page, browserName, hasTouch }) => {
+test("layout fits narrow screens and the sticky header respects safe areas", async ({ page, browserName, hasTouch }) => {
   await mockFeeds(page);
   await page.setViewportSize({ width: 360, height: 640 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.goto("/");
   await expect(page.locator(".story")).toHaveCount(12);
+  const firstRow = page.locator(".story").first();
+  const topbar = page.locator(".topbar");
+  await expect(firstRow).toHaveCSS("background-color", hasTouch ? "rgba(0, 0, 0, 0)" : "rgb(32, 31, 28)");
+  await expect(firstRow.locator(".story-title a")).toHaveCSS("color", hasTouch ? "rgb(236, 233, 227)" : "rgb(224, 164, 88)");
+  expect(await firstRow.evaluate(row => getComputedStyle(row, "::before").backgroundColor))
+    .toBe(hasTouch ? "rgba(0, 0, 0, 0)" : "rgb(224, 164, 88)");
 
   if (hasTouch && browserName === "chromium") {
     const devtools = await page.context().newCDPSession(page);
     await devtools.send("Emulation.setSafeAreaInsetsOverride", {
       insets: { top: 47, bottom: 34, left: 42, right: 42 },
     });
-    await expect(page.locator(".topbar")).toHaveCSS("padding-top", "59px");
+    await expect(topbar).toHaveCSS("padding-top", "59px");
     await expect(page.locator(".site-footer")).toHaveCSS("padding-left", "42px");
     await expect(page.locator(".site-footer")).toHaveCSS("padding-right", "42px");
     await expect(page.locator(".install-hint")).toHaveCSS("bottom", "46px");
@@ -89,28 +95,33 @@ test("layout fits 360, 768 and 1440px and the sticky header respects safe areas"
       const strip = getComputedStyle(body, "::before");
       return [strip.height, strip.backgroundColor];
     })).toEqual(["47px", "rgb(18, 18, 18)"]);
-    const row = page.locator(".story").first();
-    const { x, y, height } = await row.locator(".story-source").boundingBox();
+    const { x, y, height } = await firstRow.locator(".story-source").boundingBox();
     await devtools.send("Input.dispatchTouchEvent", {
       type: "touchStart",
       touchPoints: [{ x: x + 10, y: y + height / 2 }],
     });
     try {
-      await expect(row).toHaveCSS("transform", "matrix(0.985, 0, 0, 0.985, 0, 0)");
+      await expect(firstRow).toHaveCSS("transform", "matrix(0.985, 0, 0, 0.985, 0, 0)");
     } finally {
       await devtools.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     }
-    await expect(row).toHaveCSS("transform", "none");
+    await expect(firstRow).toHaveCSS("transform", "none");
+    await devtools.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
   }
 
-  for (const width of [360, 768, 1440]) {
+  for (const width of [320, 360, 768, 1440]) {
     await page.setViewportSize({ width, height: 640 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    const header = await topbar.boundingBox();
+    const themeButton = await topbar.getByRole("button", { name: "Toggle theme" }).boundingBox();
+    expect(themeButton.x + themeButton.width).toBeLessThanOrEqual(header.x + header.width - 16);
   }
   await page.evaluate(() => window.scrollTo(0, 200));
-  expect((await page.locator(".topbar").boundingBox()).y).toBe(0);
+  expect((await topbar.boundingBox()).y).toBe(0);
+  await expect(topbar).toHaveCSS("backdrop-filter", hasTouch ? "none" : "blur(12px)");
 
   if (hasTouch) {
+    await expect(topbar).toHaveCSS("background-color", "rgb(18, 18, 18)");
     await expect(page.locator("html")).toHaveCSS("overscroll-behavior-y", "none");
     await expect(page.locator(".feed-option").first()).toHaveCSS("touch-action", "manipulation");
     await expect(page.locator(".feed-option").first()).toHaveCSS("-webkit-tap-highlight-color", "rgba(0, 0, 0, 0)");
