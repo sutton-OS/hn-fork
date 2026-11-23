@@ -31,6 +31,26 @@ test("desktop headlines and direct files use native new tabs", async ({ page, ha
 test.describe("touch preview", () => {
   test.beforeEach(async ({ hasTouch }) => { test.skip(!hasTouch); });
 
+  test("iOS Home Screen headlines open the publisher without requesting a preview", async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(navigator, "standalone", { value: true }));
+    const previewRequests = [];
+    page.on("request", request => {
+      if (/\/api\/(?:embeddable|reader)\?/.test(request.url())) previewRequests.push(request.url());
+    });
+    await feed(page);
+    const headline = page.getByRole("link", { name: "Headline 2", exact: true });
+    const popup = page.waitForEvent("popup");
+    await headline.tap();
+    const publisherTab = await popup;
+    await expect(publisherTab).toHaveURL(publisher + "/article/1");
+    await expect(publisherTab.getByText("Live publisher page")).toBeVisible();
+    await publisherTab.close();
+
+    await expect(headline).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(previewRequests).toEqual([]);
+  });
+
   test("site and reader modes, focus, scroll, and every dismissal path", async ({ page, context }) => {
     await feed(page);
     const link = page.getByRole("link", { name: "Headline 20", exact: true });
@@ -141,7 +161,37 @@ test.describe("touch preview", () => {
     expect(await page.evaluate(() => history.state?.sheet)).toBeFalsy();
   });
 
-  test("a stalled iframe times out to Reader and cancels cleanly on close", async ({ page }) => {
+  test("Reader is available while the publisher check is pending and keeps its place when Site loads", async ({ page }) => {
+    await feed(page);
+    const probe = Promise.withResolvers();
+    await page.route("**/api/embeddable?**", async route => {
+      await probe.promise;
+      await route.fallback();
+    });
+    try {
+      await page.clock.install();
+      const probeStarted = page.waitForRequest("**/api/embeddable?**");
+      const readerReady = page.waitForResponse("**/api/reader?**");
+      await page.getByRole("link", { name: "Headline 2", exact: true }).tap();
+      await probeStarted;
+      await readerReady;
+      await page.clock.fastForward(2100);
+      const dialog = page.getByRole("dialog");
+      const heading = dialog.getByRole("heading", { name: article.title });
+      await expect(heading).toBeVisible();
+      await expect(dialog.locator("iframe")).toHaveCount(0);
+
+      probe.resolve();
+      const site = dialog.getByRole("button", { name: "Switch to Site" });
+      await expect(site).toBeVisible();
+      await expect(heading).toBeVisible();
+      await site.click();
+      await expect(page.frameLocator(".preview-content iframe").getByText("Live publisher page")).toBeVisible();
+      await expect(heading).toBeHidden();
+    } finally { probe.resolve(); }
+  });
+
+  test("a stalled iframe shows Reader early and is removed when it times out", async ({ page }) => {
     await feed(page);
     let release;
     const held = new Promise(resolve => { release = resolve; });
@@ -154,8 +204,11 @@ test.describe("touch preview", () => {
       const dialog = page.getByRole("dialog");
       await expect(dialog.getByRole("progressbar")).toHaveCount(1);
       await expect(dialog.getByRole("link", { name: "Open in browser" })).toHaveAttribute("href", publisher + "/article/1");
-      await page.clock.fastForward(8100);
+      await page.clock.fastForward(2100);
       await expect(dialog.getByRole("heading", { name: article.title })).toBeVisible();
+      await expect(dialog.locator("iframe")).toBeHidden();
+      await expect(dialog.locator("iframe")).toHaveCount(1);
+      await page.clock.fastForward(6100);
       await expect(dialog.locator("iframe")).toHaveCount(0);
     } finally { release(); }
   });

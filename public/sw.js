@@ -1,7 +1,7 @@
 import "./modules/alert-device.js";
 import { FEED_CACHE } from "./modules/feed-cache.js";
 
-const STATIC_CACHE = "shell-v1";
+const STATIC_CACHE = "shell-v2";
 const STATIC_ASSETS = [
   "/index.html",
   "/app.js?v=41",

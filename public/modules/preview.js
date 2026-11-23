@@ -4,11 +4,13 @@ import { lockSheetScroll, wireSheetDrag } from "./sheet.js";
 const externalIcon = '<path d="M13 5h6v6m0-6-9 9"/><path d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>';
 const closeIcon = '<path d="m6 6 12 12M18 6 6 18"/>';
 const icon = path => '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+const SITE_HEAD_START_MS = 2000;
+const PREVIEW_TIMEOUT_MS = 8000;
 
 async function query(endpoint, id, signal) {
   const request = new AbortController();
   const abort = () => request.abort();
-  const timer = setTimeout(abort, 8000);
+  const timer = setTimeout(abort, PREVIEW_TIMEOUT_MS);
   signal.addEventListener("abort", abort, { once: true });
   try {
     const response = await fetch("/api/" + endpoint + "?id=" + encodeURIComponent(id), {
@@ -88,16 +90,19 @@ export function openPreview(link, restore, alertStory) {
 
   const controller = new AbortController();
   const { signal } = controller;
+  let readerTimer;
   let frameTimer;
   let closing = false;
-  let readerPromise;
+  let readerRequest;
   let article;
   let liveFrame;
+  let siteReady = false;
   let readerNode;
 
   function dismiss(manual) {
     if (closing) return;
     closing = true;
+    clearTimeout(readerTimer);
     clearTimeout(frameTimer);
     controller.abort();
     dialog.classList.add("is-closing");
@@ -150,10 +155,10 @@ export function openPreview(link, restore, alertStory) {
     content.querySelector("a").href = url.href;
   }
 
-  async function getReader() {
-    readerPromise ??= query("reader", id, signal).catch(() => null);
-    article = await readerPromise;
-    return article;
+  function updateToggle() {
+    toggle.hidden = !siteReady || !article;
+    toggle.textContent = liveFrame?.hidden ? "Site" : "Reader";
+    toggle.setAttribute("aria-label", "Switch to " + toggle.textContent);
   }
 
   function showReader() {
@@ -169,53 +174,62 @@ export function openPreview(link, restore, alertStory) {
     if (liveFrame) liveFrame.hidden = true;
     readerNode.hidden = false;
     bar.hidden = true;
-    toggle.hidden = !liveFrame;
-    toggle.textContent = "Site";
-    toggle.setAttribute("aria-label", "Switch to Site");
+    updateToggle();
   }
 
   async function readerOrFallback() {
+    clearTimeout(readerTimer);
+    clearTimeout(frameTimer);
     liveFrame?.remove();
     liveFrame = null;
-    await getReader();
+    siteReady = false;
+    await readerRequest;
     if (signal.aborted) return;
     if (article) showReader();
     else fallback();
   }
 
   function showSite(finalUrl) {
-    liveFrame = document.createElement("iframe");
-    liveFrame.title = title;
-    liveFrame.loading = "eager";
-    liveFrame.referrerPolicy = "no-referrer";
-    liveFrame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox");
-    liveFrame.src = finalUrl;
-    frameTimer = setTimeout(readerOrFallback, 8000);
-    liveFrame.onerror = () => { clearTimeout(frameTimer); void readerOrFallback(); };
-    liveFrame.onload = async () => {
+    const frame = document.createElement("iframe");
+    liveFrame = frame;
+    frame.title = title;
+    frame.loading = "eager";
+    frame.hidden = Boolean(readerNode);
+    frame.referrerPolicy = "no-referrer";
+    frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox");
+    frame.src = finalUrl;
+    frameTimer = setTimeout(readerOrFallback, PREVIEW_TIMEOUT_MS);
+    frame.onerror = () => { if (!signal.aborted && liveFrame === frame) void readerOrFallback(); };
+    frame.onload = async () => {
+      if (signal.aborted || liveFrame !== frame) return;
+      siteReady = true;
+      clearTimeout(readerTimer);
       clearTimeout(frameTimer);
       bar.hidden = true;
-      await getReader();
-      if (signal.aborted || !liveFrame || !article) return;
-      toggle.hidden = false;
-      toggle.textContent = liveFrame.hidden ? "Site" : "Reader";
-      toggle.setAttribute("aria-label", "Switch to " + toggle.textContent);
+      await readerRequest;
+      if (!signal.aborted && liveFrame === frame) updateToggle();
     };
-    content.replaceChildren(liveFrame);
+    content.append(frame);
   }
   toggle.onclick = () => {
     if (!liveFrame.hidden) return showReader();
     readerNode.hidden = true;
     liveFrame.hidden = false;
-    toggle.textContent = "Reader";
-    toggle.setAttribute("aria-label", "Switch to Reader");
+    updateToggle();
   };
 
   async function load() {
     let decision;
+    readerRequest = query("reader", id, signal).then(result => { article = result; }, () => {});
+    readerTimer = setTimeout(async () => {
+      // Keep fast sites first and let the article take over if the site stalls.
+      await readerRequest;
+      if (article && !signal.aborted && !siteReady && decision?.reason !== "non-html") showReader();
+    }, SITE_HEAD_START_MS);
     try { decision = await decisionFor(id, url, signal); } catch {}
     if (signal.aborted) return;
     if (decision?.reason === "non-html") {
+      clearTimeout(readerTimer);
       // Extensionless downloads are identifiable only after the asynchronous probe.
       const tab = window.open("about:blank", "_blank");
       if (tab) {

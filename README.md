@@ -137,7 +137,9 @@ To exercise the Redis scripts with an isolated local Redis instance, set `HNX_RE
 
 ## Mobile link previews
 
-External headlines in the modern feed open a bottom sheet on coarse-pointer screens up to 768px wide. The sheet keeps the selected row, scroll position, and a Back entry. The header offers the original link in every mode. The plain and classic skins keep their native links.
+External headlines open the publisher directly when HNx runs from the iOS or iPadOS Home Screen. On other coarse-pointer screens up to 768px wide, external headlines in the modern feed open a bottom sheet. The sheet keeps the selected row, scroll position, and a Back entry. The header offers the original link in every mode. The plain and classic skins keep their native links.
+
+The sheet requests Reader while it checks whether the publisher can be embedded. If the live site is still loading after two seconds, the sheet shows Reader as soon as it is available and offers a Site toggle if the live page finishes loading.
 
 `GET /api/embeddable?id=…` checks final publisher headers with HEAD and a bounded GET fallback. `GET /api/reader?id=…` extracts public HTML with Readability and sanitizes it with DOMPurify in a time-limited jsdom worker. Both endpoints resolve the publisher link from the Hacker News item identified by `id`. Publisher requests use vetted public addresses, and the eight-second budget covers the item lookup and preview. Warm function instances cache frame decisions for 24 hours and reader results for up to one hour, and limit each client IP to 40 requests per minute per instance. A domain cache entry is reused only for the same URL because paths can have different frame policies, redirects, or content types.
 

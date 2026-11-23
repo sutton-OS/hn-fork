@@ -1,4 +1,5 @@
 import { getItem } from "./api.js?v=41";
+import { isIOS, isStandalone } from "./pwa.js";
 import { closeOpenSheet } from "./sheet.js";
 import { getSafeUrl } from "./utils.js";
 
@@ -91,6 +92,7 @@ function isPublisherPreview(id) {
 
 export function wirePreview(app) {
   app.addEventListener("click", event => {
+    if (isIOS && isStandalone()) return;
     const link = event.target.closest('.story-list .story-title a[target="_blank"]');
     if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.shiftKey ||
         event.altKey || event.metaKey || !navigator.onLine || !mobile.matches || link.hasAttribute("download") || link.dataset.previewBypass) return;
