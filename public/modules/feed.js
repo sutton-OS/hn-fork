@@ -1,11 +1,11 @@
-import { PAGE_SIZE, INITIAL_PAGE_SIZE } from "./config.js";
-import { getStories, getItem, wireDiscussionPrefetch } from "./api.js?v=35";
+import { PAGE_SIZE, INITIAL_PAGE_SIZE, FEED_SAVED } from "./config.js";
+import { getStories, getItem, wireDiscussionPrefetch } from "./api.js?v=37";
 import { navigateTo } from "./routing.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError, isInteractiveTarget } from "./utils.js";
 
 const LOAD_AHEAD_PX = 160;
 
-export function createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView }) {
+export function createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView, saved, savedView }) {
   let selectedStoryIndex = -1;
   let listKeyboardHandler = null;
   const { topbar, wireFeedToggleButtons } = ui;
@@ -151,6 +151,11 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       return;
     }
 
+    if (getCurrentFeed() === FEED_SAVED || !navigator.onLine) {
+      link.click();
+      return;
+    }
+
     const href = getSafeUrl(link.getAttribute("href"));
     if (href) {
       window.open(href, "_blank", "noopener,noreferrer");
@@ -171,11 +176,15 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     if (!storyId) {
       return;
     }
+    if (!navigator.onLine) {
+      saved.notify("You’re offline. Reconnect to load discussions.");
+      return;
+    }
     navigateTo(`/item/${storyId}`);
   }
 
   function handleListKeyboardNavigation(event) {
-    if (event.defaultPrevented) {
+    if (event.defaultPrevented || savedView.dialog.open) {
       return;
     }
 
@@ -299,9 +308,110 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     `;
   }
 
+  function wireStoryActions(listEl, lookup) {
+    listEl.addEventListener("click", (event) => {
+      const row = event.target.closest(".story[data-story-id]");
+      if (!row) return;
+      const id = Number(row.dataset.storyId);
+      const bookmark = event.target.closest("[data-bookmark]");
+      const title = event.target.closest(".story-title a");
+      if (bookmark) {
+        const story = lookup(id);
+        if (story) void saved.ready.then(() => savedView.toggle(story));
+      } else if (event.target.closest("[data-remove-saved]")) {
+        saved.remove(id);
+      } else if (event.target.closest("[data-retry-saved]")) {
+        saved.retry(id);
+      } else if (title && (getCurrentFeed() === FEED_SAVED || (!navigator.onLine && saved.get(id)))) {
+        event.preventDefault();
+        savedView.open(id, title);
+      }
+    });
+    listEl.addEventListener("error", (event) => {
+      if (event.target.matches(".story-favicon")) event.target.hidden = true;
+    }, true);
+  }
+
+  function renderSavedPage(controller) {
+    app.dataset.view = "list";
+    app.innerHTML = `
+      <section class="list-pane">
+        ${topbar()}
+        <div id="feed-panel" role="tabpanel" aria-labelledby="feed-tab-saved">
+          <p class="status saved-empty">Nothing saved yet. Tap the bookmark on any story.</p>
+          <ul class="story-list" role="list"></ul>
+          <footer class="saved-footer">
+            <p class="status" data-saved-size></p>
+            <button class="btn" type="button" data-clear-saved>Clear all saved</button>
+          </footer>
+        </div>
+      </section>
+    `;
+    wireFeedToggleButtons();
+    const listEl = app.querySelector(".story-list");
+    const empty = app.querySelector(".saved-empty");
+    const size = app.querySelector("[data-saved-size]");
+    const clear = app.querySelector("[data-clear-saved]");
+    const rows = new Map();
+    let estimateVersion = 0;
+
+    function paint() {
+      const version = ++estimateVersion;
+      const items = saved.list();
+      const present = new Set(items.map((item) => item.id));
+      let lostFocus = false;
+      for (const [id, row] of rows) {
+        if (!present.has(id)) {
+          lostFocus ||= row.contains(document.activeElement);
+          row.remove();
+          rows.delete(id);
+        }
+      }
+
+      let next = listEl.firstElementChild;
+      for (const [index, item] of items.entries()) {
+        let row = rows.get(item.id);
+        if (!row) {
+          row = createElementFromHTML(renderStoryRow(item, index + 1, { savedRow: true }));
+          rows.set(item.id, row);
+        }
+        row.dataset.storyRank = index + 1;
+        if (row !== next) listEl.insertBefore(row, next);
+        next = row.nextElementSibling;
+        savedView.updateRow(row);
+      }
+
+      empty.hidden = items.length > 0;
+      clear.disabled = items.length === 0;
+      size.textContent = `${items.length} saved`;
+      if (lostFocus || (!items.length && document.activeElement === clear)) {
+        (listEl.querySelector(".story-title a") || app.querySelector("#feed-tab-saved"))?.focus({ preventScroll: true });
+      }
+      applyListSelection();
+      void saved.estimate().then((storage) => {
+        if (version === estimateVersion && !controller.signal.aborted && Number.isFinite(storage?.usage)) {
+          size.textContent = `${items.length} saved, ~${(storage.usage / 1_000_000).toFixed(1)} MB`;
+        }
+      });
+    }
+
+    clear.addEventListener("click", () => saved.clear());
+    wireStoryActions(listEl, saved.get);
+    initializeListSelection(listEl);
+    saved.events.addEventListener("change", paint, { signal: controller.signal });
+    window.addEventListener("online", paint, { signal: controller.signal });
+    window.addEventListener("offline", paint, { signal: controller.signal });
+    paint();
+  }
+
   async function renderListPage() {
     const controller = new AbortController();
     setViewController(controller);
+    if (getCurrentFeed() === FEED_SAVED) {
+      renderSavedPage(controller);
+      return;
+    }
+    const storiesById = new Map();
     let infiniteObserver = null;
     let scrollHandler = null;
     const teardownInfiniteLoading = () => {
@@ -343,9 +453,17 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       }
 
       initializeListSelection(listEl);
-      listEl.addEventListener("error", (event) => {
-        if (event.target.matches(".story-favicon")) event.target.hidden = true;
-      }, true);
+      wireStoryActions(listEl, (id) => storiesById.get(id));
+      function refreshRowActions(event) {
+        const id = event?.detail;
+        if (id) {
+          const row = listEl.querySelector(`[data-story-id="${id}"].story`);
+          if (row) savedView.updateRow(row);
+        } else {
+          listEl.querySelectorAll(".story[data-story-id]").forEach(savedView.updateRow);
+        }
+      }
+      saved.events.addEventListener("change", refreshRowActions, { signal: controller.signal });
 
       const setListStatus = (value = "") => {
         const next = (value || "").trim();
@@ -361,6 +479,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
         if (!next) {
           return;
         }
+        savedView.updateRow(next);
         sourceRow.replaceWith(next);
         applyListSelection({ scroll: false });
       };
@@ -421,6 +540,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
         }
 
         if (story) {
+          storiesById.set(Number(story.id), story);
           replaceRow(loadingRow, renderStoryRow(story, rank));
           return;
         }
@@ -433,6 +553,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       let nextBatchStart = 0;
       let hasLoadedPage = false;
       let hasScrolled = false;
+      let stoppedOffline = false;
       const seenStoryIds = new Set();
 
       const handleBackgroundLoadError = (error) => {
@@ -444,8 +565,11 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           return;
         }
         hasMore = false;
-        setListStatus(`Could not load stories: ${error.message}`);
-        retryPageButton.hidden = false;
+        stoppedOffline = !navigator.onLine;
+        setListStatus(stoppedOffline
+          ? hasLoadedPage ? "Reconnect to load more stories." : "Reconnect to load this feed for offline use."
+          : `Could not load stories: ${error.message}`);
+        retryPageButton.hidden = stoppedOffline;
       };
 
       const loadNextBatchInBackground = () => {
@@ -480,6 +604,23 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           }, 0);
         }
       };
+
+      window.addEventListener("offline", () => {
+        refreshRowActions();
+        if (!retryPageButton.hidden) {
+          stoppedOffline = true;
+          retryPageButton.hidden = true;
+          setListStatus("Reconnect to load stories.");
+        }
+      }, { signal: controller.signal });
+      window.addEventListener("online", () => {
+        refreshRowActions();
+        if (stoppedOffline) {
+          stoppedOffline = false;
+          hasMore = true;
+          loadNextBatchInBackground();
+        }
+      }, { signal: controller.signal });
 
       const loadNextBatch = async () => {
         if (
@@ -546,12 +687,14 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           let visibleRank = listEl.querySelectorAll(".story").length;
           batchStories.forEach((story) => {
             visibleRank += 1;
+            if (story && Number.isSafeInteger(Number(story.id))) storiesById.set(Number(story.id), story);
             const html =
               story && Number.isFinite(Number(story.id))
                 ? renderStoryRow(story, visibleRank)
                 : renderFailedStoryRow("unknown", visibleRank);
             const row = createElementFromHTML(html);
             if (row) {
+              savedView.updateRow(row);
               nextRows.push(row);
               fragment.appendChild(row);
             }
@@ -622,7 +765,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     }
   }
 
-  function renderStoryRow(story, index) {
+  function renderStoryRow(story, index, { savedRow = false } = {}) {
     if (!story) {
       return "";
     }
@@ -631,17 +774,18 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     const domain = (story.domain || getDomain(story.url) || "news.ycombinator.com").toLowerCase();
     const safeUrl = getSafeUrl(story.url);
     const discussionPath = Number.isInteger(storyId) && storyId > 0 ? `#/item/${storyId}` : "#/";
-    const storyUrl = safeUrl || discussionPath;
+    const storyUrl = savedRow ? "#reader-title" : safeUrl || discussionPath;
     const storyTitleRaw = story.title || "Untitled";
     const storyTitle = escapeHTML(storyTitleRaw);
     const escapedStoryUrl = escapeHTML(storyUrl);
-    const isExternal = Boolean(safeUrl);
+    const isExternal = !savedRow && Boolean(safeUrl);
     const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
-    const age = `${timeAgo(story.time)} ago`;
+    const age = `${timeAgo(story.hnTime ?? story.time)} ago`;
     const titleContent = `
       <a
         href="${escapedStoryUrl}"
         ${isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}
+        ${savedRow ? 'aria-haspopup="dialog"' : "data-online-link"}
         data-story-id="${storyId}"
       >${storyTitle}</a>
     `;
@@ -649,20 +793,27 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     return `
       <li class="story" data-story-rank="${index}" data-story-id="${storyId}">
         <div class="story-title">${titleContent}</div>
-        <div class="story-meta">
-          <span class="story-source">
-            <span class="favicon-slot" aria-hidden="true">
-              <img class="story-favicon" src="${escapeHTML(faviconUrl)}" width="16" height="16"
-                alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+        <div class="story-meta story-bookmark-meta">
+          <div class="story-meta-content">
+            <span class="story-source">
+              ${savedRow || !navigator.onLine ? "" : `<span class="favicon-slot" aria-hidden="true">
+                <img class="story-favicon" src="${escapeHTML(faviconUrl)}" width="16" height="16"
+                  alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+              </span>`}
+              <span class="domain">${escapeHTML(domain)}</span>
             </span>
-            <span class="domain">${escapeHTML(domain)}</span>
-          </span>
-          <span class="meta-part"><span class="meta-divider" aria-hidden="true">·</span> ${age}</span>
-          <span class="meta-part">
-            <span class="meta-divider" aria-hidden="true">·</span>
-            <a class="story-comments-link" href="${escapeHTML(discussionPath)}" aria-label="comments on ${storyTitle}">comments</a>
-          </span>
+            <span class="meta-part"><span class="meta-divider" aria-hidden="true">·</span> ${age}</span>
+            <span class="meta-part">
+              <span class="meta-divider" aria-hidden="true">·</span>
+              <a class="story-comments-link" href="${escapeHTML(discussionPath)}" data-online-link aria-label="comments on ${storyTitle}">comments</a>
+            </span>
+          </div>
+          <div class="story-save-actions">
+            ${savedView.bookmark(storyId)}
+            ${savedRow ? savedView.overflow(storyTitleRaw) : ""}
+          </div>
         </div>
+        ${savedView.rowStatus()}
       </li>
     `;
   }

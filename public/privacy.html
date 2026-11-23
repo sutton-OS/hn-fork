@@ -12,7 +12,7 @@
     <title>Privacy — HNx</title>
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2" />
     <script src="./theme-init.js?v=36"></script>
-    <link rel="stylesheet" href="./styles.css?v=36" />
+    <link rel="stylesheet" href="/styles.css?v=37" />
   </head>
   <body class="privacy-page">
     <main class="privacy-shell">
@@ -80,6 +80,19 @@
           Our servers fetch public Hacker News data from the official HN Firebase API
           (stories, items, and progressive comment pages) so the browser does not need
           a direct relationship with upstream hosts.
+        </p>
+
+        <h2>Saved stories and offline reading</h2>
+        <p>
+          Saved bookmarks, article text, and downloaded images are stored in this browser.
+          Remove a story or clear saved stories from the Saved tab. The app also stores its
+          interface and recently loaded feed pages on this device for offline use.
+        </p>
+        <p>
+          When you save an article, HNx requests the public article and up to eight images
+          from their publishers on your behalf. Those requests carry no browser cookies
+          or authorization headers. Your browser sends the article and image URLs to HNx
+          so the server can retrieve them.
         </p>
 
         <h2>What the host may see</h2>
@@ -154,15 +167,14 @@
           <li>
             Content-Security-Policy with <code>default-src 'none'</code> and
             first-party allowlists for scripts, styles, fonts, and API calls. The
-            image allowlist also permits Google’s favicon service.
+            image allowlist also permits Google’s favicon service and locally stored image blobs.
           </li>
           <li>Strict-Transport-Security, frame denial, nosniff, Permissions-Policy</li>
           <li>
             Full app: HN HTML sanitized with vendored DOMPurify before render.
             Plain HTML reader: parser-based server-side allowlist sanitizer (http(s) links only).
           </li>
-          <li>No open URL-fetch proxy endpoints</li>
-          <li>No service worker / offline cache (avoids stale or opaque client storage)</li>
+          <li>Offline copy endpoints check public network addresses, restrict response types, and limit requests.</li>
         </ul>
 
         <h2>Source</h2>
@@ -171,7 +183,7 @@
           stricter, that is a welcome bug report.
         </p>
 
-        <p class="privacy-updated">Last updated: 2026-11-22</p>
+        <p class="privacy-updated">Last updated: 2026-11-23</p>
       </article>
     </main>
   </body>

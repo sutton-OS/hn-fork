@@ -16,14 +16,14 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=2" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
     <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon.png?v=2" />
-    <link rel="manifest" href="/site.webmanifest?v=3" />
+    <link rel="manifest" href="/site.webmanifest?v=4" />
     <link rel="preload" href="/fonts/Geist-1.9.2-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/GeistMono-1.9.2-Variable.woff2" as="font" type="font/woff2" crossorigin />
-    <script src="./theme-init.js?v=36"></script>
-    <link rel="stylesheet" href="./styles.css?v=36" />
-    <link rel="modulepreload" href="./app.js?v=36" />
-    <script src="./prefetch.js?v=35" type="module"></script>
-    <script src="./app.js?v=36" type="module"></script>
+    <script src="/theme-init.js?v=36"></script>
+    <link rel="stylesheet" href="/styles.css?v=37" />
+    <link rel="modulepreload" href="/app.js?v=37" />
+    <script src="/prefetch.js?v=37" type="module"></script>
+    <script src="/app.js?v=37" type="module"></script>
   </head>
   <body>
     <noscript>
@@ -44,7 +44,22 @@
         </div>
       </div>
     </noscript>
+    <p class="offline-banner status" data-offline-banner role="status" hidden>Offline. Showing saved and recently loaded stories</p>
     <main id="app" class="app" aria-live="polite"></main>
     <footer class="site-footer"><a href="/privacy.html">Privacy</a></footer>
+    <dialog class="reader-sheet" aria-labelledby="reader-title" data-reader>
+      <header class="reader-header">
+        <h1 id="reader-title" data-reader-title></h1>
+        <div class="reader-actions">
+          <button class="btn" type="button" aria-label="Save for later" aria-pressed="false" data-reader-save>Save</button>
+          <button class="btn" type="button" data-reader-close autofocus>Close</button>
+        </div>
+      </header>
+      <div class="reader-content" data-reader-content></div>
+    </dialog>
+    <div class="save-toast" data-save-toast>
+      <span role="status" aria-live="polite"></span>
+      <button class="btn" type="button" data-save-undo hidden>Undo</button>
+    </div>
   </body>
 </html>

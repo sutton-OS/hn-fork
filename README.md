@@ -10,7 +10,8 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - **Publisher favicons** in the full app come from Google’s favicon service with no referrer
 - **Vendored DOMPurify** for comment/HTML sanitization (no CDN)
 - **Strict security headers** (CSP, HSTS, Referrer-Policy, Permissions-Policy, COOP/CORP)
-- **No open URL-fetch proxy**
+- **Restricted article and image fetches** use public addresses, bounded responses, and per-IP rate limits
+- **Saved articles and recent feeds** are stored on the device for offline reading
 - **Theme** uses tab `sessionStorage` only (so the privacy page matches light/dark)
 - **No-JS**: plain HTML reader at [`/plain`](https://hn-fork.vercel.app/plain) (server-rendered)
 - **Classic 90s skin**: bare HTML blue-links mode at [`/classic`](https://hn-fork.vercel.app/classic) (double-tap `H` from the modern app)
@@ -20,7 +21,7 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 
 - `public/` — static UI (`index.html`, `app.js`, `styles.css`, vendored libs, fonts)
 - `public/modules/` — native ES modules for routing, API/cache, feeds, stories, comments, shared UI, and sanitization
-- `api/` — Vercel serverless endpoints (`stories`, `item`, `thread`, `html/*`)
+- `api/` — Vercel serverless endpoints (`stories`, `item`, `thread`, `reader`, `image`, `html/*`)
 - `lib/hn.js` — shared HN fetch/normalize helpers for API routes
 - `lib/html.js` — HTML escaping, parser-based `sanitize-html` sanitizer, and plain-reader layout helpers
 - `test/` — unit/API regression tests and desktop/mobile Playwright tests
@@ -51,7 +52,7 @@ From the modern app, **double-tap `H`** jumps to the matching classic page (feed
 
 ## Run locally
 
-Use Node 24 (the pinned production runtime).
+Use Node 24.15 or later in the Node 24 line (the pinned production runtime).
 
 Use Vercel dev when you need the API routes:
 
@@ -89,11 +90,19 @@ Vercel caches successful standard first-page feed responses for 20 seconds. The 
 
 Story and comment pages fail on upstream fetch errors instead of silently skipping unavailable items. Retry controls preserve the failed page; genuine missing/deleted items still advance pagination. Each reply list owns its pagination cursor and deduplicates comment IDs across pages. Revisiting a discussion refreshes its comments. Comment indentation adds 14 pixels per level through depth six, then stops.
 
+## Saved and offline
+
+Use the bookmark button on any feed story and open it from **Saved**. For HN discussions without an external article, the copy contains the original post text when available. The 200-story prompt lets you confirm saving another story. Removing a bookmark deletes its text and images. The Saved footer reports the browser’s estimated storage usage for the HNx origin.
+
+After the service worker installs, the shell and visited feed pages are available offline. Only first-party feed responses are cached by the worker. Saved article text and images live in IndexedDB. Bump the `shell-vN` constant in `public/sw.js` on shell releases and update the precache URLs whenever an asset version changes.
+
 ## Deploy
 
 Deploy on Vercel. Static files live in `public/`, and serverless endpoints live in `api/`. There is no build step.
 
-Run `npm run verify` before `vercel --prod`. The linked Vercel project uses Node 24 and installs the locked runtime dependencies for server-rendered sanitization.
+Run `npm run verify` before `vercel --prod`. The linked Vercel project uses Node 24 and installs the locked runtime dependencies for article extraction and sanitization. Deploy the static files, API functions, and `vercel.json` together. The Vercel config enables [CommonJS loading of ES modules](https://vercel.com/docs/functions/runtimes/node-js/advanced-node-configuration#experimental-node.js-require-of-es-module) for jsdom’s dependencies.
+
+The reader and image functions enforce per-IP limits of 20 and 160 requests per minute per function instance. Set a [Vercel Firewall rate-limit rule](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting) keyed by IP for `/api/reader` and `/api/image` for a shared limit across instances. Where the plan supports only one rule, match both paths and use a combined limit of 180 requests per minute.
 
 ## Keyboard
 

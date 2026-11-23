@@ -908,3 +908,234 @@ a:hover {
     transition: none !important;
   }
 }
+
+.offline-banner {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 6px var(--page-padding);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.saved-count {
+  margin-inline-start: 0.3em;
+  color: var(--text-2);
+  font: 400 11px/1 var(--font-mono);
+}
+
+.story-bookmark-meta {
+  flex-wrap: nowrap;
+  justify-content: space-between;
+}
+
+.story-meta-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 0.65ch;
+  min-width: 0;
+}
+
+.story-save-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.save-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.save-icon::-webkit-details-marker {
+  display: none;
+}
+
+.save-icon:hover,
+.save-icon:focus-visible {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.save-icon[aria-pressed="true"],
+.reader-actions [aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.save-icon[aria-pressed="true"] svg {
+  fill: currentColor;
+}
+
+.saved-overflow {
+  position: relative;
+}
+
+.saved-menu {
+  position: absolute;
+  z-index: 1;
+  inset: 100% 0 auto auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.saved-menu button {
+  min-height: 44px;
+  padding-inline: 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.saved-menu button:hover,
+.saved-menu button:focus-visible {
+  background: var(--surface-hover);
+}
+
+.save-row-status {
+  margin-top: 4px;
+}
+
+.saved-empty {
+  padding: 20px 16px;
+}
+
+.saved-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.reader-sheet {
+  width: min(var(--page-max), calc(100% - 2 * var(--page-padding)));
+  max-width: none;
+  max-height: min(90vh, 90dvh);
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  overscroll-behavior: contain;
+}
+
+.reader-sheet::backdrop {
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+}
+
+.reader-header,
+.reader-content {
+  padding: 16px var(--page-padding);
+}
+
+.reader-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.reader-header h1 {
+  margin: 0;
+  font-size: clamp(1.1rem, 1rem + 0.8vw, 1.7rem);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.reader-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.reader-actions .btn,
+.saved-footer .btn {
+  min-height: 44px;
+}
+
+.reader-content > .btn {
+  margin-top: 12px;
+}
+
+.reader-content,
+.reader-article {
+  overflow-wrap: anywhere;
+}
+
+.reader-article figure {
+  margin-inline: 0;
+}
+
+.reader-article table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+
+.reader-article :is(td, th) {
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+}
+
+.save-toast {
+  position: fixed;
+  z-index: 3;
+  inset: auto var(--page-padding) max(16px, env(safe-area-inset-bottom)) auto;
+  max-width: calc(100% - 2 * var(--page-padding));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.save-toast.is-visible {
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: 400 12px/1.5 var(--font-mono);
+  pointer-events: auto;
+}
+
+.save-toast .btn {
+  min-height: 44px;
+}
+
+@media (max-width: 420px) {
+  .feed-picker {
+    gap: 12px;
+  }
+
+  .reader-sheet {
+    inset: auto 0 0;
+    width: 100%;
+    margin: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .reader-content {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}

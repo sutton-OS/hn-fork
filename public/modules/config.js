@@ -15,6 +15,7 @@ export const FEED_BEST = "best";
 export const FEED_TOP = "top";
 export const FEED_NEW = "new";
 export const FEEDS = [FEED_BEST, FEED_TOP, FEED_NEW];
+export const FEED_SAVED = "saved";
 export const LIST_VISIBLE_REFRESH_AFTER_MS = 60 * 1000;
 export const THREAD_PREFETCH_MAX = 24;
 export const THREAD_PREFETCH_TTL_MS = 30_000;

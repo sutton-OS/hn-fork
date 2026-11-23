@@ -1,7 +1,7 @@
 import { COMMENTS_PAGE_SIZE } from "./config.js";
-import { fetchThread, startDiscussion } from "./api.js?v=35";
-import { createCommentsView } from "./comments.js?v=35";
-import { sanitizeHNHTML } from "./sanitize.js";
+import { fetchThread, startDiscussion } from "./api.js?v=37";
+import { createCommentsView } from "./comments.js?v=37";
+import { sanitizeHNHTML } from "./sanitize.js?v=37";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError } from "./utils.js";
 
 export function createStoryView({ app, ui }) {
