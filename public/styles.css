@@ -241,6 +241,10 @@ iframe {
   .feed-picker {
     gap: 8px;
   }
+
+  .topbar-actions {
+    gap: 4px;
+  }
 }
 
 .topbar-actions {
