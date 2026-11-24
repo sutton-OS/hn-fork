@@ -44,6 +44,8 @@ test.describe("PWA installation", () => {
     expect(manifest.icons.map(icon => [icon.sizes, icon.purpose ?? "any"])).toEqual([
       ["192x192", "any"], ["512x512", "any"], ["512x512", "maskable"],
     ]);
+    // Other styles put the page under light status bar text, which fails on the light theme.
+    await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute("content", "default");
     const appleIcon = page.locator('link[rel="apple-touch-icon"]');
     await expect(appleIcon).toHaveAttribute("sizes", "180x180");
     for (const icon of [...manifest.icons, { src: await appleIcon.getAttribute("href"), sizes: "180x180" }]) {
@@ -57,7 +59,7 @@ test.describe("PWA installation", () => {
     }
     expect((await page.request.get("/sw.js")).headers()["cache-control"]).toBe("no-cache");
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toMatch(/\/sw\.js$/);
-    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v4"]);
+    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v5"]);
     if (browserName === "chromium") {
       const devtools = await page.context().newCDPSession(page);
       expect((await devtools.send("Page.getAppManifest")).errors).toEqual([]);

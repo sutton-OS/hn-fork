@@ -317,7 +317,8 @@ iframe {
 }
 
 @media (display-mode: standalone) {
-  /* iOS draws light status bar text with black-translucent. */
+  /* iOS stores the status bar style when the icon is added. Icons added with
+     black-translucent keep light text over the page. The default style has no inset here. */
   .reader-page body::before {
     background: var(--dark-bg);
   }

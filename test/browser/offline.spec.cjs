@@ -259,7 +259,7 @@ test("a service worker update replaces old shell caches and preserves loaded fee
     });
     newer = true;
     await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
-    await expect.poll(() => page.evaluate(() => caches.keys())).toEqual(["hnx-feed-v1", "shell-v5"]);
+    await expect.poll(() => page.evaluate(() => caches.keys())).toEqual(["hnx-feed-v1", "shell-v6"]);
     await page.reload();
     await expect(page).toHaveTitle("HNx updated");
     await context.setOffline(true);
