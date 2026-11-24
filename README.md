@@ -159,7 +159,7 @@ Shortcuts leave focused links, buttons, form fields, and editable content to the
 
 **List view**
 
-- `j` / `k` or arrows — move selection
+- `j` / `k` or arrows — show or move selection
 - `Enter` — open article
 - `c` — open discussion
 - `g` / `G` — first / last story

@@ -9,6 +9,8 @@ const LOAD_AHEAD_PX = 160;
 export function createFeedView({ app, ui, getCurrentFeed, setViewController, isCurrentView, saved, savedView }) {
   let selectedStoryIndex = -1;
   let showListSelection = false;
+  /** Set while keyboard use decides the highlight, so rows scrolling under a still cursor don't change it. */
+  let keyboardSelection = false;
   let listKeyboardHandler = null;
   /** The list on screen, and the list kept intact behind an open discussion. */
   let activeList = null;
@@ -27,6 +29,24 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     selectedStoryIndex = nextIndex;
     showListSelection = true;
     applyListSelection();
+  }
+
+  function hideListSelection() {
+    if (!showListSelection) return;
+    showListSelection = false;
+    applyListSelection();
+  }
+
+  // With a mouse, only the story under the cursor is highlighted.
+  function handleListPointer(event) {
+    if (event.pointerType !== "mouse") return;
+    // Some browsers repeat pointermove, without movement, when the page scrolls.
+    if (event.type === "pointermove" && (event.movementX || event.movementY)) keyboardSelection = false;
+    // Touch screens can report a mouse resting where the last tap was.
+    else if (keyboardSelection || touchInput.matches) return;
+    const row = event.type === "pointerleave" ? null : event.target.closest?.(".story-list .story");
+    if (row) setSelectedStoryElement(row);
+    else hideListSelection();
   }
 
   function getListStoryElements() {
@@ -80,6 +100,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     const clamped = Math.max(0, Math.min(nextIndex, stories.length - 1));
     selectedStoryIndex = clamped;
     showListSelection = true;
+    keyboardSelection = true;
     applyListSelection({ scroll });
   }
 
@@ -208,15 +229,17 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       return;
     }
 
+    // Without a highlight, the first press brings it back instead of moving past it.
+    const step = showListSelection ? 1 : 0;
     if (event.key === "j" || event.key === "ArrowDown") {
       event.preventDefault();
-      selectStoryIndex(selectedStoryIndex + 1);
+      selectStoryIndex(selectedStoryIndex + step);
       return;
     }
 
     if (event.key === "k" || event.key === "ArrowUp") {
       event.preventDefault();
-      selectStoryIndex(selectedStoryIndex - 1);
+      selectStoryIndex(selectedStoryIndex - step);
       return;
     }
 
@@ -231,6 +254,8 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       selectStoryIndex(stories.length - 1);
       return;
     }
+
+    if (!showListSelection) return;
 
     if (event.key === "Enter") {
       event.preventDefault();
@@ -247,30 +272,29 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
   function initializeListSelection(listEl) {
     const stories = Array.from(listEl.querySelectorAll(".story"));
     selectedStoryIndex = stories.length ? 0 : -1;
-    showListSelection = !touchInput.matches;
+    showListSelection = false;
+    keyboardSelection = false;
     applyListSelection({ scroll: false });
 
     if (!listEl.dataset.selectionWired) {
       listEl.dataset.selectionWired = "true";
 
-      listEl.addEventListener("pointermove", (event) => {
-        if (event.pointerType === "mouse") {
-          setSelectedStoryElement(event.target.closest(".story"));
-        }
-      });
-
       listEl.addEventListener("focusin", (event) => {
+        if (event.target.matches(":focus-visible")) keyboardSelection = true;
         setSelectedStoryElement(event.target.closest(".story"));
       });
     }
 
-    wireListKeyboard();
+    wireListInput();
   }
 
-  function wireListKeyboard() {
+  function wireListInput() {
     if (!listKeyboardHandler) {
       listKeyboardHandler = handleListKeyboardNavigation;
       document.addEventListener("keydown", listKeyboardHandler);
+      document.addEventListener("pointerover", handleListPointer);
+      document.addEventListener("pointermove", handleListPointer, { passive: true });
+      document.documentElement.addEventListener("pointerleave", handleListPointer);
     }
   }
 
@@ -279,7 +303,11 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     const list = activeList;
     if (!list || list.controller.signal.aborted || !isCurrentView(list.controller) || !list.canPark()) return false;
     const focused = list.pane.contains(document.activeElement) ? document.activeElement : null;
-    parkedList = { list, focused, scrollTop: Math.max(0, window.scrollY), selectedStoryIndex, showListSelection };
+    parkedList = {
+      list, focused, scrollTop: Math.max(0, window.scrollY), selectedStoryIndex, keyboardSelection,
+      // The mouse may be anywhere by the time the list is back.
+      showListSelection: showListSelection && (keyboardSelection || touchInput.matches),
+    };
     activeList = null;
     teardownListSelection();
     list.pane.remove();
@@ -301,9 +329,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     list.pane.querySelector("[data-theme-toggle]")
       ?.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "light"));
     focused?.focus({ preventScroll: true });
-    ({ selectedStoryIndex, showListSelection } = selection);
+    ({ selectedStoryIndex, showListSelection, keyboardSelection } = selection);
     applyListSelection();
-    wireListKeyboard();
+    wireListInput();
     window.scrollTo({ top: scrollTop, behavior: "instant" });
     list.resume();
     return true;
@@ -326,6 +354,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
 
     if (listKeyboardHandler) {
       document.removeEventListener("keydown", listKeyboardHandler);
+      document.removeEventListener("pointerover", handleListPointer);
+      document.removeEventListener("pointermove", handleListPointer);
+      document.documentElement.removeEventListener("pointerleave", handleListPointer);
       listKeyboardHandler = null;
     }
   }
