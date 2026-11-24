@@ -235,6 +235,18 @@ iframe {
   }
 }
 
+/* Leave room for wider fallback fonts and a three-digit saved count. */
+@media (max-width: 340px) {
+  .topbar,
+  .feed-picker {
+    gap: 8px;
+  }
+
+  .topbar-actions {
+    gap: 4px;
+  }
+}
+
 .topbar-actions {
   flex: 0 0 auto;
 }
@@ -317,7 +329,8 @@ iframe {
 }
 
 @media (display-mode: standalone) {
-  /* iOS draws light status bar text with black-translucent. */
+  /* iOS stores the status bar style when the icon is added. Icons added with
+     black-translucent keep light text over the page. The default style has no inset here. */
   .reader-page body::before {
     background: var(--dark-bg);
   }
@@ -432,6 +445,27 @@ iframe {
 [data-list-sentinel] {
   width: 100%;
   height: 1px;
+}
+
+/* Zero height, so the prompt never moves the rows. */
+.feed-update {
+  position: sticky;
+  top: calc(72px + env(safe-area-inset-top));
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  height: 0;
+}
+
+.feed-update .btn {
+  align-self: flex-start;
+  border-color: var(--border-strong);
+  border-radius: 999px;
+  color: var(--accent);
+}
+
+.feed-update .btn[hidden] {
+  display: none;
 }
 
 .pull-indicator {

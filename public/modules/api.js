@@ -1,6 +1,6 @@
 import { STORIES_ENDPOINT, ITEM_ENDPOINT, THREAD_ENDPOINT, PAGE_SIZE, COMMENTS_PAGE_SIZE, THREAD_PREFETCH_MAX, THREAD_PREFETCH_TTL_MS } from "./config.js";
 import { normalizeFeed, createAbortError } from "./utils.js";
-import { requestFeedPage } from "./feed-cache.js";
+import { requestFeedPage, readRecentFeedPage } from "./feed-cache.js?v=43";
 
 const threadPrefetchCache = new Map();
 const inflightPrefetches = new Set();
@@ -207,54 +207,77 @@ export function prefetchThread(id, { limit = COMMENTS_PAGE_SIZE } = {}) {
   return entry.promise;
 }
 
-export function wireDiscussionPrefetch(root) {
+export function wireDiscussionPrefetch(root, onDiscussionIntent) {
   if (!root || root.dataset.prefetchWired === "true") {
     return;
   }
   root.dataset.prefetchWired = "true";
 
-  const selector = "a[href^='#/item/'], a[href^='#/story/']";
-  let hoveredLink = null;
+  const selector = "a[href^='#/item/'], a[href^='#/story/'], button[data-action='load-replies']:not([data-loaded])";
+  let target = null;
   let timer;
   let cancelPrefetch = null;
 
-  function resetHover() {
+  function reset() {
     clearTimeout(timer);
     cancelPrefetch?.();
     cancelPrefetch = null;
-    hoveredLink = null;
+    target = null;
+  }
+
+  function targetId(element) {
+    if (element.dataset.action) return Number(element.dataset.commentId);
+    const match = (element.getAttribute("href") || "").match(/^#\/(?:item|story)\/(\d+)$/);
+    return match ? Number(match[1]) : 0;
+  }
+
+  function start(element, id) {
+    if (!root.contains(element)) return;
+    if (!element.dataset.action) onDiscussionIntent?.();
+    const key = `${id}:0:${COMMENTS_PAGE_SIZE}`;
+    prefetchThread(id);
+    const entry = threadPrefetchCache.get(key);
+    cancelPrefetch = () => {
+      if (threadPrefetchCache.get(key) === entry && inflightPrefetches.has(entry)) {
+        threadPrefetchCache.delete(key);
+        entry.controller.abort();
+      }
+    };
   }
 
   root.addEventListener("pointerover", (event) => {
     if (!navigator.onLine) return;
     if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
-    const link = event.target.closest?.(selector);
-    if (!link || link === hoveredLink || !root.contains(link)) return;
-    const match = (link.getAttribute("href") || "").match(/^#\/(?:item|story)\/(\d+)$/);
-    if (!match) return;
-
-    resetHover();
-    hoveredLink = link;
-    timer = setTimeout(() => {
-      if (!root.contains(link)) return;
-      const id = Number(match[1]);
-      const key = `${id}:0:${COMMENTS_PAGE_SIZE}`;
-      prefetchThread(id);
-      const entry = threadPrefetchCache.get(key);
-      cancelPrefetch = () => {
-        if (threadPrefetchCache.get(key) === entry && inflightPrefetches.has(entry)) {
-          threadPrefetchCache.delete(key);
-          entry.controller.abort();
-        }
-      };
-    }, DISCUSSION_HOVER_DELAY_MS);
+    const element = event.target.closest?.(selector);
+    if (!element || element === target || !root.contains(element)) return;
+    const id = targetId(element);
+    if (!id) return;
+    reset();
+    target = element;
+    timer = setTimeout(() => start(element, id), DISCUSSION_HOVER_DELAY_MS);
   });
+
+  // A press is enough intent. The request gets a head start on the click.
+  root.addEventListener("pointerdown", (event) => {
+    if (!navigator.onLine || !event.isPrimary || event.button !== 0) return;
+    const element = event.target.closest?.(selector);
+    if (!element || !root.contains(element)) return;
+    const id = targetId(element);
+    if (!id) return;
+    if (element !== target) reset();
+    clearTimeout(timer);
+    target = element;
+    start(element, id);
+  }, { passive: true });
 
   root.addEventListener("pointerout", (event) => {
-    if (hoveredLink?.contains(event.target) && !hoveredLink.contains(event.relatedTarget)) {
-      resetHover();
+    // A touch pointer leaves before its click. Only a cancelled touch, such as a scroll, resets it.
+    if (event.pointerType === "touch") return;
+    if (target?.contains(event.target) && !target.contains(event.relatedTarget)) {
+      reset();
     }
   });
+  root.addEventListener("pointercancel", reset);
 }
 
 export function normalizeStoriesPage(payload, { offset = 0, limit = PAGE_SIZE } = {}) {
@@ -283,9 +306,16 @@ export function normalizeStoriesPage(payload, { offset = 0, limit = PAGE_SIZE } 
   };
 }
 
+/** Last stored first page, when it is recent enough to show before the network. */
+export async function getRecentStories(feed, { limit = PAGE_SIZE } = {}) {
+  const url = `${STORIES_ENDPOINT}?feed=${normalizeFeed(feed)}&offset=0&limit=${limit}`;
+  const payload = await readRecentFeedPage(url);
+  return payload ? normalizeStoriesPage(payload, { offset: 0, limit }) : null;
+}
+
 export async function getStories(
   feed,
-  { signal, offset = 0, limit = PAGE_SIZE } = {},
+  { signal, offset = 0, limit = PAGE_SIZE, fresh = false } = {},
 ) {
   const normalizedFeed = normalizeFeed(feed);
   const safeOffset = Math.max(0, Number(offset) || 0);
@@ -294,7 +324,7 @@ export async function getStories(
 
   // Reuse the head-script prefetch for the first paint only.
   const early = window.__hnxStoriesPrefetch;
-  if (early?.promise && early.url === expectedUrl) {
+  if (!fresh && early?.promise && early.url === expectedUrl) {
     window.__hnxStoriesPrefetch = null;
     const payload = await awaitWithSignal(early.promise, signal);
     if (payload) {
@@ -302,7 +332,7 @@ export async function getStories(
     }
   }
 
-  const response = await requestFeedPage(expectedUrl, { signal });
+  const response = await requestFeedPage(expectedUrl, { signal, fresh });
   const errorPrefix = "Stories request failed";
   const payload = await readJSON(await requireOK(response, expectedUrl, errorPrefix), errorPrefix);
   return normalizeStoriesPage(payload, { offset: safeOffset, limit: safeLimit });

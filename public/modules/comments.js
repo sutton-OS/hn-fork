@@ -1,5 +1,5 @@
 import { COMMENTS_PAGE_SIZE, COMMENTS_DOM_BATCH, MAX_COMMENT_DEPTH, COMMENT_CLAMP_PX } from "./config.js";
-import { fetchThread } from "./api.js?v=41";
+import { fetchThread } from "./api.js?v=43";
 import { sanitizeHNHTML } from "./sanitize.js?v=41";
 import { createTaskQueue, timeAgo, isAbortError, isInteractiveTarget } from "./utils.js";
 
@@ -415,6 +415,7 @@ export function createCommentsView({ app }) {
         serverHasMore: Boolean(data.hasMore),
       });
       model.loaded = true;
+      model.buttonEl.dataset.loaded = "true";
       model.buttonEl.textContent = model.replyCount === 1 ? "1 reply" : `${model.replyCount} replies`;
       const comment = model.container.parentElement;
       setCommentCollapsed(state, comment, comment.classList.contains("is-collapsed"));

@@ -1,4 +1,4 @@
-import { getItem } from "./api.js?v=41";
+import { getItem } from "./api.js?v=43";
 import { isIOS, isStandalone } from "./pwa.js";
 import { closeOpenSheet } from "./sheet.js";
 import { getSafeUrl } from "./utils.js";

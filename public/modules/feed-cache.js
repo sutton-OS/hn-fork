@@ -1,4 +1,7 @@
 export const FEED_CACHE = "hnx-feed-v1";
+/** Older copies wait for the network instead of flashing outdated stories. */
+export const FEED_REUSE_MS = 60 * 60 * 1000;
+const STORED_AT = "x-hnx-stored";
 
 export function isFeedPage(url) {
   return url.pathname === "/api/stories" &&
@@ -10,7 +13,8 @@ export async function cacheFeedPage(request, response) {
   try {
     const copy = response.clone();
     const cache = await caches.open(FEED_CACHE);
-    await cache.put(request, copy);
+    const headers = new Headers({ "content-type": "application/json", [STORED_AT]: String(Date.now()) });
+    await cache.put(request, new Response(copy.body, { status: copy.status, headers }));
   } catch {
     // The feed still works if Cache Storage is unavailable.
   }
@@ -24,7 +28,19 @@ export async function findFeedPage(request) {
   }
 }
 
-export async function requestFeedPage(url, { signal } = {}) {
+export async function readRecentFeedPage(url) {
+  const cached = await findFeedPage(url);
+  const age = Date.now() - Number(cached?.headers.get(STORED_AT) || NaN);
+  if (!(age >= 0 && age < FEED_REUSE_MS)) return null;
+  try {
+    return await cached.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Fresh requests bypass the CDN copy. They still update the stored page. */
+export async function requestFeedPage(url, { signal, fresh = false } = {}) {
   if (!navigator.onLine) {
     const cached = await findFeedPage(url);
     if (!cached) throw new Error("This page of the feed has not been loaded yet.");
@@ -33,7 +49,7 @@ export async function requestFeedPage(url, { signal } = {}) {
 
   const page = new URL(url, location.href);
   const cache = page.searchParams.get("offset") === "0" ? "default" : "no-store";
-  const response = await fetch(url, { signal, cache, headers: { accept: "application/json" } });
+  const response = await fetch(fresh ? `${url}&fresh=1` : url, { signal, cache, headers: { accept: "application/json" } });
   if (isFeedPage(page)) await cacheFeedPage(url, response);
   return response;
 }

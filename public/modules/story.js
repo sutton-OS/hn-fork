@@ -1,6 +1,6 @@
 import { COMMENTS_PAGE_SIZE } from "./config.js";
-import { fetchThread, startDiscussion } from "./api.js?v=41";
-import { createCommentsView } from "./comments.js?v=41";
+import { fetchThread, startDiscussion } from "./api.js?v=43";
+import { createCommentsView } from "./comments.js?v=43";
 import { sanitizeHNHTML } from "./sanitize.js?v=41";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError } from "./utils.js";
 
@@ -79,7 +79,7 @@ export function createStoryView({ app, ui }) {
     return rendered;
   }
 
-  async function renderStoryPage(id, signal, discussion) {
+  async function renderStoryPage(id, signal, discussion, known) {
     const storyId = Number(id);
     app.dataset.view = "story";
     teardownStoryKeyboard();
@@ -115,6 +115,12 @@ export function createStoryView({ app, ui }) {
     `;
 
     let detailSlot = app.querySelector("[data-story-shell]");
+    const preview = known ? normalizeStoryDetail({ ...known, time: known.hnTime ?? known.time }) : null;
+    if (preview?.title) {
+      // Show what the feed row already had. The shell stays until live details arrive.
+      detailSlot = paintStoryDetail(detailSlot, preview) || detailSlot;
+      detailSlot.dataset.storyShell = "known";
+    }
     const commentsSection = app.querySelector(".comments");
     const commentsRoot = app.querySelector("[data-comments-root]");
     const commentsStatus = app.querySelector("[data-comments-status]");
@@ -163,7 +169,7 @@ export function createStoryView({ app, ui }) {
 
         if (parentPromise) {
           const parent = await parentPromise;
-          if (!signal.aborted && !parent && retry.isConnected && detailSlot?.hasAttribute("data-story-shell")) {
+          if (!signal.aborted && !parent && retry.isConnected && detailSlot?.dataset.storyShell === "") {
             detailSlot.innerHTML = `
               <div class="story-title">failed to load story</div>
               <div class="story-meta"><span>${escapeHTML(error.message)}</span></div>

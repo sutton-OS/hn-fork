@@ -87,7 +87,11 @@ Dependencies are pinned in `package.json` and `package-lock.json`; Dependabot ch
 
 ## Data loading
 
-Vercel caches successful standard first-page feed responses for 20 seconds. The modern feed loads 12 stories first and waits for scrolling when that page already fills the viewport. A direct discussion streams the title and story text before comments finish loading, using one request to Hacker News for the parent. Hover prefetches wait for sustained pointer intent and are capped at two in flight. Completed prefetches expire after 30 seconds and are consumed once. Opening prefetched comments fetches current story details in parallel.
+Vercel caches successful standard first-page feed responses for 20 seconds, then may serve that copy for up to five more minutes while it fetches a new one. The modern feed loads 12 stories first and waits for scrolling when that page already fills the viewport. If the device stored that page within the last hour, it appears right away and the live page follows. Pull to refresh skips both copies.
+
+Opening a discussion keeps the feed's rows and scroll position for going back. Returning to the app after a minute checks for new stories. They replace the rows only when the reader is at the top and has not started using the list; otherwise a button offers them.
+
+A direct discussion streams the title and story text before comments finish loading, using one request to Hacker News for the parent. A discussion opened from the feed shows the row's title at once. Discussions and replies start loading on sustained hover or on press, with at most two requests in flight; leaving or scrolling cancels them. Completed prefetches expire after 30 seconds and are consumed once. Opening prefetched comments fetches current story details in parallel.
 
 Story and comment pages fail on upstream fetch errors instead of silently skipping unavailable items. Retry controls preserve the failed page; genuine missing/deleted items still advance pagination. Each reply list owns its pagination cursor and deduplicates comment IDs across pages. Revisiting a discussion refreshes its comments. Comment indentation adds 14 pixels per level through depth six, then stops.
 

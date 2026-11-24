@@ -124,7 +124,7 @@ it("caches only successful, standard first pages of public feeds", async () => {
     const res = response();
     await handler(request("GET", query), res);
     assert.equal(res.statusCode, 200);
-    assert.equal(res.headers["vercel-cdn-cache-control"], shouldCache ? "max-age=20" : undefined);
+    assert.equal(res.headers["vercel-cdn-cache-control"], shouldCache ? "max-age=20, stale-while-revalidate=300" : undefined);
     assert.equal(res.headers["cache-control"], shouldCache ? "public, max-age=0, must-revalidate" : "no-store");
   }
 
