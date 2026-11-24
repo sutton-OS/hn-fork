@@ -59,7 +59,7 @@ test.describe("PWA installation", () => {
     }
     expect((await page.request.get("/sw.js")).headers()["cache-control"]).toBe("no-cache");
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toMatch(/\/sw\.js$/);
-    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v5"]);
+    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v6"]);
     if (browserName === "chromium") {
       const devtools = await page.context().newCDPSession(page);
       expect((await devtools.send("Page.getAppManifest")).errors).toEqual([]);
@@ -117,6 +117,11 @@ test("layout fits narrow screens and the sticky header respects safe areas", asy
     const header = await topbar.boundingBox();
     const themeButton = await topbar.getByRole("button", { name: "Toggle theme" }).boundingBox();
     expect(themeButton.x + themeButton.width).toBeLessThanOrEqual(header.x + header.width - 16);
+    // The header also has to fit the 200 bookmarks that can be saved without a warning.
+    await page.locator("[data-saved-count]").evaluate(count => { count.textContent = "200"; });
+    const button = await topbar.getByRole("button", { name: "Toggle theme" }).boundingBox();
+    expect(button.x + button.width).toBeLessThanOrEqual(header.x + header.width - 16);
+    await page.locator("[data-saved-count]").evaluate(count => { count.textContent = "0"; });
   }
   await page.evaluate(() => window.scrollTo(0, 200));
   expect((await topbar.boundingBox()).y).toBe(0);

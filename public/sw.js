@@ -1,13 +1,13 @@
 import "./modules/alert-device.js";
 import { FEED_CACHE } from "./modules/feed-cache.js";
 
-const STATIC_CACHE = "shell-v5";
+const STATIC_CACHE = "shell-v6";
 const STATIC_ASSETS = [
   "/index.html",
   "/app.js?v=43",
   "/prefetch.js?v=43",
   "/theme-init.js?v=41",
-  "/styles.css?v=44",
+  "/styles.css?v=45",
   "/privacy.html",
   "/manifest.webmanifest",
   "/maskable-512x512.png",

@@ -92,7 +92,7 @@ function createTestServer({ isNewShell = () => false } = {}) {
       res.setHeader("content-type", `${types[path.extname(file)] || "application/octet-stream"}; charset=utf-8`);
       let content = fs.readFileSync(file);
       if (isNewShell()) {
-        if (relative === "sw.js") content = content.toString().replace('"shell-v5"', '"shell-v6"');
+        if (relative === "sw.js") content = content.toString().replace('"shell-v6"', '"shell-v7"');
         if (relative === "index.html") content = content.toString().replace("<title>HNx</title>", "<title>HNx updated</title>");
       }
       res.end(content);

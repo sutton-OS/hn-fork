@@ -235,6 +235,14 @@ iframe {
   }
 }
 
+/* Leave room for wider fallback fonts and a three-digit saved count. */
+@media (max-width: 340px) {
+  .topbar,
+  .feed-picker {
+    gap: 8px;
+  }
+}
+
 .topbar-actions {
   flex: 0 0 auto;
 }
