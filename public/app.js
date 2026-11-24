@@ -5,8 +5,8 @@ import { wireAlerts } from "./modules/alerts.js";
 import { touchInput, wirePWA } from "./modules/pwa.js";
 import { parseRoute } from "./modules/routing.js";
 import { createUI } from "./modules/ui.js?v=41";
-import { createFeedView } from "./modules/feed.js?v=42";
-import { startDiscussion } from "./modules/api.js?v=41";
+import { createFeedView } from "./modules/feed.js?v=43";
+import { startDiscussion, wireDiscussionPrefetch } from "./modules/api.js?v=43";
 
 import { createSavedStories } from "./modules/saved.js";
 import { createSavedView } from "./modules/saved-view.js";
@@ -99,7 +99,7 @@ function handleClassicSkinShortcut(event) {
 
 function handlePageShow(event) {
   if (event.persisted) {
-    refreshCurrentList();
+    refreshQuietly();
   }
 }
 
@@ -113,17 +113,32 @@ function handleVisibilityChange() {
     listHiddenAt > 0 &&
     Date.now() - listHiddenAt >= LIST_VISIBLE_REFRESH_AFTER_MS
   ) {
-    refreshCurrentList();
+    refreshQuietly();
   }
   listHiddenAt = 0;
 }
 
+function canRefreshList() {
+  return !document.body.classList.contains("preview-open") && app.dataset.view === "list" &&
+    currentFeed !== FEED_SAVED && navigator.onLine && !savedView.dialog.open;
+}
+
+// Coming back to the page must not lose the reader's place.
+function refreshQuietly() {
+  if (canRefreshList() && !feed.refreshList()) refreshCurrentList();
+}
+
 function refreshCurrentList() {
-  if (document.body.classList.contains("preview-open")) return;
-  if (app.dataset.view !== "list" || currentFeed === FEED_SAVED || !navigator.onLine || savedView.dialog.open) {
-    return;
-  }
-  void renderRoute({ type: "list" });
+  if (!canRefreshList()) return;
+  void renderRoute({ type: "list" }, { fresh: true });
+}
+
+function loadStoryModule() {
+  storyModule ??= import("./modules/story.js?v=43").catch((error) => {
+    storyModule = null;
+    throw error;
+  });
+  return storyModule;
 }
 
 async function handleRouteChange() {
@@ -136,8 +151,15 @@ async function handleRouteChange() {
   await renderRoute(route);
 }
 
-async function renderRoute(route = parseRoute(), scrollTop) {
+async function renderRoute(route = parseRoute(), { scrollTop, fresh = false } = {}) {
+  const known = route.type === "story" ? feed.findStory(route.id) : null;
+  if (route.type === "story") {
+    // Applies to this history entry. Going forward must not scroll the list before it is parked.
+    history.scrollRestoration = "manual";
+    if (app.dataset.view === "list" && feed.parkList()) currentViewController = null;
+  }
   abortCurrentViewLoad();
+  if (route.type === "list" && feed.resumeList()) return;
   feed.teardownListSelection();
   app.dataset.view = "";
   app.innerHTML = "";
@@ -159,14 +181,10 @@ async function renderRoute(route = parseRoute(), scrollTop) {
     const discussion = validId ? startDiscussion(route.id, { signal: controller.signal }) : null;
 
     try {
-      storyModule ??= import("./modules/story.js?v=41").catch((error) => {
-        storyModule = null;
-        throw error;
-      });
-      const { createStoryView } = await storyModule;
+      const { createStoryView } = await loadStoryModule();
       if (!isCurrentView(controller)) return;
       story ??= createStoryView({ app, ui });
-      await story.renderStoryPage(route.id, controller.signal, discussion);
+      await story.renderStoryPage(route.id, controller.signal, discussion, known);
     } catch {
       if (!isCurrentView(controller) || controller.signal.aborted) return;
       controller.abort();
@@ -185,7 +203,7 @@ async function renderRoute(route = parseRoute(), scrollTop) {
   }
 
   if (scrollTop !== undefined) window.scrollTo({ top: 0, behavior: "instant" });
-  await feed.renderListPage({ scrollTop });
+  await feed.renderListPage({ scrollTop, fresh });
 }
 
 function canHandleRouteInPlace(route) {
@@ -214,7 +232,7 @@ function rerenderListForFeedChange(scrollTop) {
   if (hash && hash !== "/") {
     window.location.hash = "/";
   }
-  void renderRoute({ type: "list" }, scrollTop);
+  void renderRoute({ type: "list" }, { scrollTop });
 }
 
 function abortCurrentViewLoad() {
@@ -234,6 +252,7 @@ document.addEventListener("auxclick", guardOnlineAction);
 window.addEventListener("online", updateConnectivity);
 window.addEventListener("offline", updateConnectivity);
 updateConnectivity();
+wireDiscussionPrefetch(app, () => void loadStoryModule().catch(() => {}));
 wirePWA(app, refreshCurrentList);
 wireAlerts(app);
 wireNotificationStories(app);

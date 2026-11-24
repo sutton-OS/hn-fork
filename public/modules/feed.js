@@ -1,5 +1,5 @@
-import { PAGE_SIZE, INITIAL_PAGE_SIZE, FEED_SAVED } from "./config.js";
-import { getStories, getItem, wireDiscussionPrefetch } from "./api.js?v=41";
+import { PAGE_SIZE, INITIAL_PAGE_SIZE, FEED_SAVED, LIST_VISIBLE_REFRESH_AFTER_MS } from "./config.js";
+import { getStories, getRecentStories, getItem } from "./api.js?v=43";
 import { touchInput } from "./pwa.js";
 import { navigateTo } from "./routing.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError, isInteractiveTarget } from "./utils.js";
@@ -10,6 +10,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
   let selectedStoryIndex = -1;
   let showListSelection = false;
   let listKeyboardHandler = null;
+  /** The list on screen, and the list kept intact behind an open discussion. */
+  let activeList = null;
+  let parkedList = null;
   const { topbar, wireFeedToggleButtons } = ui;
 
   function setSelectedStoryElement(storyEl) {
@@ -261,10 +264,61 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       });
     }
 
+    wireListKeyboard();
+  }
+
+  function wireListKeyboard() {
     if (!listKeyboardHandler) {
       listKeyboardHandler = handleListKeyboardNavigation;
       document.addEventListener("keydown", listKeyboardHandler);
     }
+  }
+
+  /** Detach the list without stopping it, so going back keeps its rows and position. */
+  function parkList() {
+    const list = activeList;
+    if (!list || list.controller.signal.aborted || !isCurrentView(list.controller) || !list.canPark()) return false;
+    const focused = list.pane.contains(document.activeElement) ? document.activeElement : null;
+    parkedList = { list, focused, scrollTop: Math.max(0, window.scrollY), selectedStoryIndex, showListSelection };
+    activeList = null;
+    teardownListSelection();
+    list.pane.remove();
+    window.scrollTo({ top: 0, behavior: "instant" });
+    return true;
+  }
+
+  function resumeList() {
+    if (!parkedList) return false;
+    const { list, focused, scrollTop, ...selection } = parkedList;
+    parkedList = null;
+    activeList = list;
+    setViewController(list.controller);
+    app.dataset.view = "list";
+    app.replaceChildren(list.pane);
+    // Controls are updated by document queries, which miss a detached list.
+    const count = list.pane.querySelector("[data-saved-count]");
+    if (count) count.textContent = saved.count();
+    list.pane.querySelector("[data-theme-toggle]")
+      ?.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "light"));
+    focused?.focus({ preventScroll: true });
+    ({ selectedStoryIndex, showListSelection } = selection);
+    applyListSelection();
+    wireListKeyboard();
+    window.scrollTo({ top: scrollTop, behavior: "instant" });
+    list.resume();
+    return true;
+  }
+
+  /** Look for new stories without rebuilding the list. Returns false if it has nothing to keep. */
+  function refreshList() {
+    if (!activeList?.canPark() || !activeList.refresh) return false;
+    activeList.refresh();
+    return true;
+  }
+
+  /** Details already on screen for a story, used while its discussion loads. */
+  function findStory(id) {
+    return (activeList || parkedList?.list)?.lookup(id) || null;
   }
 
   function teardownListSelection() {
@@ -386,6 +440,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       });
     }
 
+    activeList = {
+      controller, pane: app.firstElementChild, lookup: saved.get, canPark: () => true, resume: paint,
+    };
     clear.addEventListener("click", () => saved.clear());
     wireStoryActions(listEl, saved.get);
     initializeListSelection(listEl);
@@ -395,13 +452,14 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     paint();
   }
 
-  async function renderListPage({ scrollTop = 0 } = {}) {
+  async function renderListPage({ scrollTop = 0, fresh = false } = {}) {
     const controller = new AbortController();
     setViewController(controller);
     if (getCurrentFeed() === FEED_SAVED) {
       renderSavedPage(controller);
       return;
     }
+    const feedName = getCurrentFeed();
     const storiesById = new Map();
     let infiniteObserver = null;
     let scrollHandler = null;
@@ -425,6 +483,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           ${topbar()}
           <div id="feed-panel" role="tabpanel" aria-labelledby="feed-tab-${getCurrentFeed()}" aria-busy="true">
             <div class="pull-indicator" aria-hidden="true"></div>
+            <div class="feed-update"><button class="btn" type="button" data-feed-update hidden></button></div>
             <ul class="story-list" role="list"></ul>
             <p class="status" data-list-status hidden></p>
             <button class="btn" type="button" data-list-retry hidden>Retry loading stories</button>
@@ -433,9 +492,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
         </section>
       `;
       wireFeedToggleButtons();
-      wireDiscussionPrefetch(app);
 
       const panel = app.querySelector("#feed-panel");
+      const updateButton = app.querySelector("[data-feed-update]");
       const listEl = app.querySelector(".story-list");
       const listStatus = app.querySelector("[data-list-status]");
       const retryPageButton = app.querySelector("[data-list-retry]");
@@ -471,7 +530,8 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       };
 
       const replaceRow = (sourceRow, html) => {
-        if (!sourceRow || !sourceRow.isConnected) {
+        // A parked list is detached, so check the list instead of the document.
+        if (sourceRow?.parentNode !== listEl) {
           return;
         }
         const next = createElementFromHTML(html);
@@ -517,7 +577,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           }
         }
 
-        if (controller.signal.aborted || !isCurrentView(controller)) {
+        if (controller.signal.aborted) {
           return;
         }
 
@@ -537,6 +597,148 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       let hasScrolled = false;
       let stoppedOffline = false;
       const seenStoryIds = new Set();
+      let generation = 0;
+      let checkedAt = 0;
+      let checking = false;
+      let engaged = false;
+      let pendingPage = null;
+
+      // Rows must not move under a reader who has started using them.
+      const markEngaged = () => { engaged = true; };
+      listEl.addEventListener("pointerdown", markEngaged, { passive: true });
+      listEl.addEventListener("pointermove", markEngaged, { passive: true });
+      listEl.addEventListener("focusin", markEngaged);
+
+      const overlayOpen = () => document.body.classList.contains("preview-open") || savedView.dialog.open;
+
+      const setPendingPage = (page, count = 0) => {
+        pendingPage = page;
+        updateButton.hidden = !page;
+        if (page) updateButton.textContent = count === 1 ? "1 new story" : `${count} new stories`;
+      };
+
+      const createRow = (story, rank) => {
+        const valid = story && Number.isFinite(Number(story.id));
+        if (valid && Number.isSafeInteger(Number(story.id))) storiesById.set(Number(story.id), story);
+        const row = createElementFromHTML(valid ? renderStoryRow(story, rank) : renderFailedStoryRow("unknown", rank));
+        if (row) savedView.updateRow(row);
+        return row;
+      };
+
+      const pageStories = (page) => {
+        const ids = new Set();
+        return (Array.isArray(page?.stories) ? page.stories : []).filter((story) => {
+          const id = Number(story?.id);
+          if (!Number.isSafeInteger(id) || ids.has(id)) return false;
+          ids.add(id);
+          return true;
+        });
+      };
+
+      const startsWith = (stories) => stories.every((story, index) =>
+        Number(listEl.children[index]?.dataset.storyId) === Number(story.id));
+
+      // Swap in a newer first page, reusing unchanged rows so focus and icons stay put.
+      const applyFirstPage = (page) => {
+        const stories = pageStories(page);
+        if (!stories.length) return;
+        const selectedId = selectedStoryIndex > 0 ? getSelectedStoryId() : null;
+        const keepRest = startsWith(stories);
+        const oldRows = new Map(Array.from(listEl.children, (row) => [Number(row.dataset.storyId), row]));
+        const rows = stories.map((story, index) => {
+          const id = Number(story.id);
+          const old = oldRows.get(id);
+          const previous = storiesById.get(id);
+          if (!old || previous?.title !== story.title || previous?.url !== story.url) return createRow(story, index + 1);
+          storiesById.set(id, story);
+          old.dataset.storyRank = String(index + 1);
+          const age = old.querySelector("[data-story-age]");
+          if (age) age.textContent = storyAge(story);
+          return old;
+        });
+        if (keepRest) rows.push(...Array.from(listEl.children).slice(stories.length));
+
+        const wanted = new Set(rows);
+        for (const row of Array.from(listEl.children)) if (!wanted.has(row)) row.remove();
+        let next = listEl.firstElementChild;
+        for (const row of rows) {
+          if (row === next) next = next.nextElementSibling;
+          else listEl.insertBefore(row, next);
+        }
+
+        if (!keepRest) {
+          generation += 1;
+          seenStoryIds.clear();
+          for (const story of stories) seenStoryIds.add(Number(story.id));
+          nextBatchStart = page.nextOffset;
+          hasMore = Boolean(page.hasMore);
+          hasScrolled = false;
+          retryPageButton.hidden = true;
+          setListStatus("");
+          if (hasMore) wireInfiniteLoading();
+        }
+        if (selectedId) {
+          const index = rows.findIndex((row) => Number(row.dataset.storyId) === selectedId);
+          if (index >= 0) selectedStoryIndex = index;
+        }
+        applyListSelection();
+        requestNextBatchIfNeeded();
+      };
+
+      const receiveFirstPage = (page) => {
+        if (controller.signal.aborted || !isCurrentView(controller)) return;
+        const stories = pageStories(page);
+        if (!stories.length) return;
+        checkedAt = Date.now();
+        const open = overlayOpen();
+        if (!open && (startsWith(stories) || (!engaged && !restoreTop && window.scrollY <= 0))) {
+          applyFirstPage(page);
+          setPendingPage(null);
+          return;
+        }
+        const count = stories.filter((story) => !seenStoryIds.has(Number(story.id))).length;
+        setPendingPage(count ? page : null, count);
+      };
+
+      const refresh = async () => {
+        if (checking || !navigator.onLine) return;
+        checking = true;
+        engaged = false;
+        try {
+          receiveFirstPage(await getStories(feedName, {
+            signal: controller.signal, offset: 0, limit: INITIAL_PAGE_SIZE,
+          }));
+        } catch {
+          // The stories on screen are still usable. The next return tries again.
+        } finally {
+          checking = false;
+        }
+      };
+
+      updateButton.addEventListener("click", () => {
+        const page = pendingPage;
+        setPendingPage(null);
+        if (!page) return;
+        applyFirstPage(page);
+        engaged = false;
+        finishRestoringScroll();
+        window.scrollTo({ top: 0, behavior: "instant" });
+        if (!touchInput.matches) listEl.querySelector(".story-title a")?.focus({ preventScroll: true });
+      });
+
+      activeList = {
+        controller,
+        pane: app.firstElementChild,
+        lookup: (id) => storiesById.get(id),
+        canPark: () => hasLoadedPage,
+        refresh,
+        resume() {
+          finishRestoringScroll();
+          refreshRowActions();
+          requestNextBatchIfNeeded();
+          if (Date.now() - checkedAt >= LIST_VISIBLE_REFRESH_AFTER_MS) void refresh();
+        },
+      };
 
       const handleBackgroundLoadError = (error) => {
         if (
@@ -621,12 +823,26 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
         try {
           const batchStart = nextBatchStart;
           const batchLimit = batchStart === 0 ? INITIAL_PAGE_SIZE : PAGE_SIZE;
-          const page = await getStories(getCurrentFeed(), {
+          const batchGeneration = generation;
+          const request = getStories(feedName, {
             signal: controller.signal,
             offset: batchStart,
             limit: batchLimit,
+            fresh: fresh && batchStart === 0,
           });
-          if (controller.signal.aborted || !isCurrentView(controller)) {
+          let page = null;
+          if (batchStart === 0 && !fresh && navigator.onLine) {
+            // Show the last stored page now. The live page follows below.
+            request.catch(() => {});
+            page = await getRecentStories(feedName, { limit: batchLimit });
+            if (page && !pageStories(page).length) page = null;
+            if (page) request.then(receiveFirstPage, () => {});
+          }
+          if (!page) {
+            page = await request;
+            if (batchStart === 0) checkedAt = Date.now();
+          }
+          if (controller.signal.aborted || !isCurrentView(controller) || batchGeneration !== generation) {
             return;
           }
 
@@ -669,14 +885,8 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           let visibleRank = listEl.querySelectorAll(".story").length;
           batchStories.forEach((story) => {
             visibleRank += 1;
-            if (story && Number.isSafeInteger(Number(story.id))) storiesById.set(Number(story.id), story);
-            const html =
-              story && Number.isFinite(Number(story.id))
-                ? renderStoryRow(story, visibleRank)
-                : renderFailedStoryRow("unknown", visibleRank);
-            const row = createElementFromHTML(html);
+            const row = createRow(story, visibleRank);
             if (row) {
-              savedView.updateRow(row);
               nextRows.push(row);
               fragment.appendChild(row);
             }
@@ -704,8 +914,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
         }
       };
 
-      if ("IntersectionObserver" in window) {
-        infiniteObserver = new IntersectionObserver(
+      function wireInfiniteLoading() {
+        if (scrollHandler) return;
+        if ("IntersectionObserver" in window) infiniteObserver = new IntersectionObserver(
           (entries) => {
             const shouldLoad = entries.some((entry) => entry.isIntersecting);
             if (shouldLoad) {
@@ -714,16 +925,18 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
           },
           { rootMargin: `${LOAD_AHEAD_PX}px 0px` },
         );
-        infiniteObserver.observe(sentinel);
+        infiniteObserver?.observe(sentinel);
+        scrollHandler = () => {
+          // A parked list must ignore scrolling in the discussion above it.
+          if (!isCurrentView(controller) || (infiniteObserver && hasScrolled)) return;
+          if (window.scrollY <= 0) return;
+          finishRestoringScroll();
+          hasScrolled = true;
+          requestNextBatchIfNeeded();
+        };
+        window.addEventListener("scroll", scrollHandler, { passive: true });
       }
-      scrollHandler = () => {
-        if (infiniteObserver && hasScrolled) return;
-        if (window.scrollY <= 0) return;
-        finishRestoringScroll();
-        hasScrolled = true;
-        requestNextBatchIfNeeded();
-      };
-      window.addEventListener("scroll", scrollHandler, { passive: true });
+      wireInfiniteLoading();
 
       await loadNextBatch().catch(handleBackgroundLoadError);
       panel.removeAttribute("aria-busy");
@@ -731,14 +944,14 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       // A saved position can be below the first page. Use the normal pager to
       // reach it, yielding to the user if they start scrolling while it loads.
       const scrollRoot = document.scrollingElement;
-      while (restoreTop && hasMore && !controller.signal.aborted &&
+      while (restoreTop && hasMore && isCurrentView(controller) &&
         scrollRoot.scrollHeight - scrollRoot.clientHeight < restoreTop &&
         !document.body.classList.contains("preview-open")) {
         const previousOffset = nextBatchStart;
         await loadNextBatch().catch(handleBackgroundLoadError);
         if (nextBatchStart <= previousOffset) break;
       }
-      if (restoreTop && !controller.signal.aborted) {
+      if (restoreTop && isCurrentView(controller)) {
         if (!document.body.classList.contains("preview-open")) {
           window.scrollTo({ top: restoreTop, behavior: "instant" });
         }
@@ -766,6 +979,10 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     }
   }
 
+  function storyAge(story) {
+    return `${timeAgo(story.hnTime ?? story.time)} ago`;
+  }
+
   function renderStoryRow(story, index, { savedRow = false } = {}) {
     if (!story) {
       return "";
@@ -781,7 +998,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     const escapedStoryUrl = escapeHTML(storyUrl);
     const isExternal = !savedRow && Boolean(safeUrl);
     const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
-    const age = `${timeAgo(story.hnTime ?? story.time)} ago`;
+    const age = storyAge(story);
     const titleContent = `
       <a
         href="${escapedStoryUrl}"
@@ -803,7 +1020,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
               </span>`}
               <span class="domain">${escapeHTML(domain)}</span>
             </span>
-            <span class="meta-part"><span class="meta-divider" aria-hidden="true">·</span> ${age}</span>
+            <span class="meta-part"><span class="meta-divider" aria-hidden="true">·</span> <span data-story-age>${age}</span></span>
             <span class="meta-part">
               <span class="meta-divider" aria-hidden="true">·</span>
               <a class="story-comments-link" href="${escapeHTML(discussionPath)}" data-online-link aria-label="comments on ${storyTitle}">comments</a>
@@ -819,5 +1036,5 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     `;
   }
 
-  return { renderListPage, teardownListSelection };
+  return { renderListPage, teardownListSelection, parkList, resumeList, refreshList, findStory };
 }

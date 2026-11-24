@@ -434,6 +434,27 @@ iframe {
   height: 1px;
 }
 
+/* Zero height, so the prompt never moves the rows. */
+.feed-update {
+  position: sticky;
+  top: calc(72px + env(safe-area-inset-top));
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  height: 0;
+}
+
+.feed-update .btn {
+  align-self: flex-start;
+  border-color: var(--border-strong);
+  border-radius: 999px;
+  color: var(--accent);
+}
+
+.feed-update .btn[hidden] {
+  display: none;
+}
+
 .pull-indicator {
   position: absolute;
   top: 0;

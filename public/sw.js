@@ -1,13 +1,13 @@
 import "./modules/alert-device.js";
 import { FEED_CACHE } from "./modules/feed-cache.js";
 
-const STATIC_CACHE = "shell-v3";
+const STATIC_CACHE = "shell-v4";
 const STATIC_ASSETS = [
   "/index.html",
-  "/app.js?v=42",
-  "/prefetch.js?v=41",
+  "/app.js?v=43",
+  "/prefetch.js?v=43",
   "/theme-init.js?v=41",
-  "/styles.css?v=42",
+  "/styles.css?v=43",
   "/privacy.html",
   "/manifest.webmanifest",
   "/maskable-512x512.png",
@@ -23,11 +23,11 @@ const STATIC_ASSETS = [
   "/modules/alert-device.js",
   "/modules/alert-rules.js",
   "/modules/alerts.js",
-  "/modules/api.js?v=41",
-  "/modules/comments.js?v=41",
+  "/modules/api.js?v=43",
+  "/modules/comments.js?v=43",
   "/modules/config.js",
-  "/modules/feed-cache.js",
-  "/modules/feed.js?v=42",
+  "/modules/feed-cache.js?v=43",
+  "/modules/feed.js?v=43",
   "/modules/preview-entry.js",
   "/modules/preview.js",
   "/modules/pwa.js",
@@ -37,7 +37,7 @@ const STATIC_ASSETS = [
   "/modules/saved-view.js",
   "/modules/saved.js",
   "/modules/sheet.js",
-  "/modules/story.js?v=41",
+  "/modules/story.js?v=43",
   "/modules/ui.js?v=41",
   "/modules/utils.js",
 ];
