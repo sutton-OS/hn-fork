@@ -59,7 +59,7 @@ test.describe("PWA installation", () => {
     }
     expect((await page.request.get("/sw.js")).headers()["cache-control"]).toBe("no-cache");
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toMatch(/\/sw\.js$/);
-    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v6"]);
+    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v7"]);
     if (browserName === "chromium") {
       const devtools = await page.context().newCDPSession(page);
       expect((await devtools.send("Page.getAppManifest")).errors).toEqual([]);
@@ -76,10 +76,16 @@ test("layout fits narrow screens and the sticky header respects safe areas", asy
   await expect(page.locator(".story")).toHaveCount(12);
   const firstRow = page.locator(".story").first();
   const topbar = page.locator(".topbar");
-  await expect(firstRow).toHaveCSS("background-color", hasTouch ? "rgba(0, 0, 0, 0)" : "rgb(32, 31, 28)");
-  await expect(firstRow.locator(".story-title a")).toHaveCSS("color", hasTouch ? "rgb(236, 233, 227)" : "rgb(224, 164, 88)");
-  expect(await firstRow.evaluate(row => getComputedStyle(row, "::before").backgroundColor))
-    .toBe(hasTouch ? "rgba(0, 0, 0, 0)" : "rgb(224, 164, 88)");
+  const accentBar = () => firstRow.evaluate(row => getComputedStyle(row, "::before").backgroundColor);
+  await expect(firstRow).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(firstRow.locator(".story-title a")).toHaveCSS("color", "rgb(236, 233, 227)");
+  expect(await accentBar()).toBe("rgba(0, 0, 0, 0)");
+  if (!hasTouch) {
+    await firstRow.hover();
+    await expect(firstRow).toHaveCSS("background-color", "rgb(32, 31, 28)");
+    await expect(firstRow.locator(".story-title a")).toHaveCSS("color", "rgb(224, 164, 88)");
+    await expect.poll(accentBar).toBe("rgb(224, 164, 88)");
+  }
 
   if (hasTouch && browserName === "chromium") {
     const devtools = await page.context().newCDPSession(page);

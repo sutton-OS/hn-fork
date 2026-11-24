@@ -54,6 +54,7 @@ test("only the current story has a selection highlight", async ({ page, hasTouch
   await page.goto("/");
   const rows = page.locator(".story-list .story");
   await expect(rows).toHaveCount(2);
+  await expect(page.locator(".story.is-selected")).toHaveCount(0);
   const secondSource = rows.nth(1).locator(".story-source");
   if (hasTouch) await secondSource.tap();
   else await secondSource.hover();
@@ -73,6 +74,86 @@ test("only the current story has a selection highlight", async ({ page, hasTouch
   await expect.poll(highlightedTitles).toEqual(["First story"]);
   await rows.nth(1).locator(".story-comments-link").focus();
   await expect.poll(highlightedTitles).toEqual(["Second story"]);
+});
+
+test("the highlight follows the mouse, or the keyboard until the mouse moves", async ({ page, hasTouch }) => {
+  test.skip(hasTouch, "Mouse only");
+  await page.route("**/api/stories?**", route => route.fulfill({ json: {
+    stories: Array.from({ length: 30 }, (_, i) => ({ id: i + 1, title: `Story ${i + 1}` })),
+    nextOffset: 30, hasMore: false,
+  } }));
+  await page.goto("/");
+  const rows = page.locator(".story-list .story");
+  const selected = page.locator(".story.is-selected .story-title");
+  await expect(rows).toHaveCount(30);
+  await expect(selected).toHaveCount(0);
+  const { x, width } = await page.locator(".story-list").boundingBox();
+  const side = x - 20;
+  const middle = x + width / 2;
+  const url = page.url();
+
+  // Nothing is highlighted, so there is nothing to open.
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("c");
+  expect(page.url()).toBe(url);
+
+  for (const leave of [
+    () => page.mouse.move(side, 300),
+    () => page.locator(".topbar").hover({ position: { x: 4, y: 4 } }),
+  ]) {
+    await rows.nth(2).hover();
+    await expect(selected).toHaveText(["Story 3"]);
+    await leave();
+    await expect(selected).toHaveCount(0);
+  }
+
+  // The keyboard picks up where the mouse left off and ignores rows scrolling past the cursor.
+  await page.keyboard.press("j");
+  await expect(selected).toHaveText(["Story 3"]);
+  await page.keyboard.press("j");
+  await expect(selected).toHaveText(["Story 4"]);
+  await page.mouse.move(middle, 400);
+  await page.keyboard.press("G");
+  await expect(selected).toHaveText(["Story 30"]);
+  await page.waitForTimeout(300);
+  await expect(selected).toHaveText(["Story 30"]);
+  await page.mouse.move(side, 300);
+  await expect(selected).toHaveCount(0);
+
+  // Scrolling moves the highlight to the story now under the cursor.
+  await page.mouse.move(middle, 400);
+  const before = await selected.textContent();
+  await page.mouse.wheel(0, -600);
+  await expect(selected).not.toHaveText(before);
+  await expect(selected).toHaveCount(1);
+});
+
+test("going back highlights a story only if the keyboard chose it", async ({ page, hasTouch }) => {
+  test.skip(hasTouch, "Mouse only");
+  await page.route("**/api/stories?**", route => route.fulfill({ json: {
+    stories: [{ id: 1, title: "First story" }, { id: 2, title: "Second story" }],
+    nextOffset: 2, hasMore: false,
+  } }));
+  await page.route("**/api/thread?**", route => route.fulfill({ json: {
+    parent: { id: 2, title: "Second story", kids: [] }, items: [], hasMore: false,
+  } }));
+  await page.goto("/");
+  const rows = page.locator(".story-list .story");
+  const selected = page.locator(".story.is-selected .story-title");
+  await rows.nth(1).locator(".story-comments-link").click();
+  await expect(page.locator(".story-detail")).toBeVisible();
+  await page.mouse.move(2, 400);
+  await page.goBack();
+  await expect(rows).toHaveCount(2);
+  await expect(selected).toHaveCount(0);
+
+  await page.keyboard.press("G");
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press("G");
+  await page.keyboard.press("c");
+  await expect(page.locator(".story-detail")).toBeVisible();
+  await page.goBack();
+  await expect(selected).toHaveText(["Second story"]);
 });
 
 test("nested replies paginate once and deduplicate shifting pages", async ({ page }) => {

@@ -1,10 +1,10 @@
 import "./modules/alert-device.js";
 import { FEED_CACHE } from "./modules/feed-cache.js";
 
-const STATIC_CACHE = "shell-v6";
+const STATIC_CACHE = "shell-v7";
 const STATIC_ASSETS = [
   "/index.html",
-  "/app.js?v=43",
+  "/app.js?v=44",
   "/prefetch.js?v=43",
   "/theme-init.js?v=41",
   "/styles.css?v=45",
@@ -27,7 +27,7 @@ const STATIC_ASSETS = [
   "/modules/comments.js?v=43",
   "/modules/config.js",
   "/modules/feed-cache.js?v=43",
-  "/modules/feed.js?v=43",
+  "/modules/feed.js?v=44",
   "/modules/preview-entry.js",
   "/modules/preview.js",
   "/modules/pwa.js",
