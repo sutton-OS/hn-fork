@@ -98,9 +98,13 @@ Story and comment pages fail on upstream fetch errors instead of silently skippi
 
 ## WSJ tab
 
-`GET /api/stories?feed=wsj&offset=…&limit=…` merges The Wall Street Journal's public Tech, Markets, U.S., World, Business, and Politics RSS feeds into one list, newest first. It covers the last seven days, up to 252 stories. It returns headlines, links, sections, and times, without summaries or photos. Links lose their tracking parameters. Opinion, lifestyle, and shopping pages are left out even when a news feed carries them.
+The tab has two lists, Top and New. It opens on Top until you pick New, and remembers the choice in `localStorage`.
 
-WSJ shares the stories function because the Vercel Hobby plan allows 12 functions per deployment and all 12 are in use. Each warm function reuses its merged list for 60 seconds, or 15 seconds for pull to refresh. If a feed fails, its last good copy stands in for up to an hour and the response skips the CDN cache. The endpoint fails only when every feed does. The politics feed uses social posts as titles, so another feed's headline wins when both carry a story.
+**New** is `GET /api/stories?feed=wsj&offset=…&limit=…`. It merges The Wall Street Journal's public Tech, Markets, U.S., World, Business, and Politics RSS feeds into one list, newest first. It covers the last seven days, up to 252 stories. It returns headlines, links, sections, and times, without summaries or photos. Links lose their tracking parameters. Opinion, lifestyle, and shopping pages are left out even when a news feed carries them.
+
+**Top** is `feed=wsj-top`. WSJ has no front-page feed, but most of its section feeds list their lead stories first. Top takes every section's first story, then every second story, and so on, up to 42. It prefers the last day and fills gaps from the day before. It adds the Economy feed and leaves out trade newsletters and scheduled market updates. The order of the feeds is undocumented, so Top approximates the front page.
+
+WSJ shares the stories function because the Vercel Hobby plan allows 12 functions per deployment and all 12 are in use. Each warm function reuses its merged list for 60 seconds, or 15 seconds for pull to refresh. If a feed fails, its last good copy stands in for up to an hour and the response skips the CDN cache. Both lists fail only when every feed in New does. The politics and economy feeds can use social posts as titles, so another feed's headline wins when both carry a story.
 
 WSJ stories have negative IDs so they cannot be taken for Hacker News items. Their headlines open wsj.com directly. They have no discussion, preview, or bookmark, and alerts and the plain and classic readers do not include them.
 

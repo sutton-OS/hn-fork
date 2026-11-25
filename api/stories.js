@@ -13,7 +13,7 @@ const {
   statusFromError,
   UPSTREAM,
 } = require("../lib/hn");
-const sendWsjStories = require("../lib/wsj-api");
+const { WSJ_FEED_NAMES, sendWsjStories } = require("../lib/wsj-api");
 
 const UA = "hnx-stories/1.0";
 
@@ -25,7 +25,7 @@ module.exports = async function handler(req, res) {
   }
 
   // Not its own function: the Vercel Hobby plan allows 12 per deployment, and all 12 are in use.
-  if (getQueryString(req.query?.feed) === "wsj") {
+  if (WSJ_FEED_NAMES.includes(getQueryString(req.query?.feed))) {
     await sendWsjStories(req, res);
     return;
   }

@@ -487,6 +487,28 @@ iframe {
   display: none;
 }
 
+.wsj-views {
+  display: flex;
+  gap: 4px;
+  padding: 4px 5px 0;
+}
+
+.wsj-view {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: 500 13px/20px var(--font-sans);
+  cursor: pointer;
+  transition: color var(--interaction), border-color var(--interaction);
+}
+
+.wsj-view[aria-pressed="true"] {
+  border-color: var(--border-strong);
+}
+
 .pull-indicator {
   position: absolute;
   top: 0;
@@ -1044,7 +1066,9 @@ a:hover {
 .topbar-start .btn:hover,
 .feed-option:hover,
 .feed-option[aria-selected="true"],
-.feed-option[aria-current="page"] {
+.feed-option[aria-current="page"],
+.wsj-view:hover,
+.wsj-view[aria-pressed="true"] {
   color: var(--text);
 }
 

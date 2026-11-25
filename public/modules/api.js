@@ -1,6 +1,6 @@
 import { ITEM_ENDPOINT, THREAD_ENDPOINT, PAGE_SIZE, COMMENTS_PAGE_SIZE, THREAD_PREFETCH_MAX, THREAD_PREFETCH_TTL_MS } from "./config.js";
 import { createAbortError } from "./utils.js";
-import { feedPageUrl, requestFeedPage, readRecentFeedPage } from "./feed-cache.js?v=45";
+import { feedPageUrl, requestFeedPage, readRecentFeedPage } from "./feed-cache.js?v=46";
 
 const threadPrefetchCache = new Map();
 const inflightPrefetches = new Set();

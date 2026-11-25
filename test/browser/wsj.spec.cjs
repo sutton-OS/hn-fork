@@ -29,6 +29,38 @@ test.describe("WSJ tab", () => {
     await expect(rows(page).locator("[data-bookmark]")).toHaveCount(1);
   });
 
+  test("opens on Top, switches to New, and remembers the choice", async ({ page }) => {
+    await page.route("**/api/stories?feed=wsj*", route => {
+      const feed = new URL(route.request().url()).searchParams.get("feed");
+      const id = feed === "wsj-top" ? -1 : -2;
+      return route.fulfill({ json: { feed, offset: 0, nextOffset: 1, total: 1, hasMore: false,
+        stories: [{ id, title: `From ${feed}`, url: `https://www.wsj.com/tech/${-id}`, domain: "wsj.com", section: "Tech", time: 1 }] } });
+    });
+    const view = name => page.getByRole("group", { name: "WSJ stories" }).getByRole("button", { name, exact: true });
+    await page.goto("/");
+    await expect(view("Top")).toHaveCount(0);
+    await tab(page).click();
+    await expect(view("Top")).toHaveAttribute("aria-pressed", "true");
+    await expect(rows(page)).toContainText("From wsj-top");
+
+    await view("New").focus();
+    await page.keyboard.press("Enter");
+    await expect(rows(page)).toContainText(/From wsj(?!-)/);
+    await expect(view("New")).toHaveAttribute("aria-pressed", "true");
+    await expect(view("New")).toBeFocused();
+    await expect(view("Top")).toHaveAttribute("aria-pressed", "false");
+    await expect(tab(page)).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#feed-panel")).toHaveAttribute("aria-labelledby", "feed-tab-wsj");
+
+    await page.getByRole("tab", { name: "Best" }).click();
+    await expect(view("New")).toHaveCount(0);
+    await page.reload();
+    await tab(page).click();
+    await expect(view("New")).toHaveAttribute("aria-pressed", "true");
+    await expect(rows(page)).not.toContainText("wsj-top");
+    await expect(rows(page)).toContainText("From wsj");
+  });
+
   test("headlines open the publisher without a preview", async ({ page, hasTouch }) => {
     const previews = [];
     page.on("request", request => {
@@ -64,7 +96,7 @@ test.describe("WSJ tab", () => {
     let shift = 0;
     let fail = true;
     const requests = [];
-    await page.route("**/api/stories?feed=wsj&**", route => {
+    await page.route("**/api/stories?feed=wsj-top&**", route => {
       const url = new URL(route.request().url());
       requests.push(url.search);
       if (fail) return route.fulfill({ status: 502, json: { error: "Wall Street Journal stories are unavailable." } });
@@ -86,7 +118,7 @@ test.describe("WSJ tab", () => {
     await expect(rows(page)).toHaveCount(12);
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await expect(rows(page)).toHaveCount(42);
-    expect(requests.at(-1)).toBe("?feed=wsj&offset=12&limit=30");
+    expect(requests.at(-1)).toBe("?feed=wsj-top&offset=12&limit=30");
 
     await page.getByRole("tab", { name: "Top" }).click();
     await page.evaluate(() => window.scrollTo(0, 0));

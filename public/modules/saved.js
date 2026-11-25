@@ -1,4 +1,4 @@
-import { getItem } from "./api.js?v=45";
+import { getItem } from "./api.js?v=46";
 import { createTaskQueue, getDomain, getSafeUrl } from "./utils.js";
 import { bookmarkMetadata, createSavedStore } from "./saved-store.js";
 
