@@ -1,11 +1,25 @@
+import { FEED_SAVED, STORIES_ENDPOINT } from "./config.js";
+import { normalizeFeed } from "./utils.js";
+
 export const FEED_CACHE = "hnx-feed-v1";
+/** Wall Street Journal headlines. Not a Hacker News feed, so it has no scores or discussions. */
+export const FEED_WSJ = "wsj";
 /** Older copies wait for the network instead of flashing outdated stories. */
 export const FEED_REUSE_MS = 60 * 60 * 1000;
 const STORED_AT = "x-hnx-stored";
 
+/** A tab name the app can show, or the default feed. */
+export function normalizeTab(feed) {
+  return feed === FEED_SAVED || feed === FEED_WSJ ? feed : normalizeFeed(feed);
+}
+
+export function feedPageUrl(feed, offset, limit) {
+  return `${STORIES_ENDPOINT}?feed=${feed === FEED_WSJ ? feed : normalizeFeed(feed)}&offset=${offset}&limit=${limit}`;
+}
+
 export function isFeedPage(url) {
-  return url.pathname === "/api/stories" &&
-    /^\?feed=(best|top|new)&offset=(?:0&limit=12|[1-9]\d{0,2}&limit=30)$/.test(url.search);
+  return url.pathname === STORIES_ENDPOINT &&
+    /^\?feed=(?:best|top|new|wsj)&offset=(?:0&limit=12|[1-9]\d{0,2}&limit=30)$/.test(url.search);
 }
 
 export async function cacheFeedPage(request, response) {

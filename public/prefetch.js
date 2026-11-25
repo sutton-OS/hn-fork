@@ -1,6 +1,6 @@
 import { FEED_BEST, INITIAL_PAGE_SIZE, STORIES_ENDPOINT } from "./modules/config.js";
 import { parseRoute } from "./modules/routing.js";
-import { requestFeedPage } from "./modules/feed-cache.js?v=43";
+import { requestFeedPage } from "./modules/feed-cache.js?v=45";
 
 if (parseRoute().type === "list") {
   const url = `${STORIES_ENDPOINT}?feed=${FEED_BEST}&offset=0&limit=${INITIAL_PAGE_SIZE}`;

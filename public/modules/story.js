@@ -1,6 +1,6 @@
 import { COMMENTS_PAGE_SIZE } from "./config.js";
-import { fetchThread, startDiscussion } from "./api.js?v=43";
-import { createCommentsView } from "./comments.js?v=43";
+import { fetchThread, startDiscussion } from "./api.js?v=45";
+import { createCommentsView } from "./comments.js?v=45";
 import { sanitizeHNHTML } from "./sanitize.js?v=41";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError } from "./utils.js";
 

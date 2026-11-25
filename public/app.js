@@ -4,9 +4,10 @@ import { wireNotificationStories, wirePreview } from "./modules/preview-entry.js
 import { wireAlerts } from "./modules/alerts.js";
 import { touchInput, wirePWA } from "./modules/pwa.js";
 import { parseRoute } from "./modules/routing.js";
-import { createUI } from "./modules/ui.js?v=41";
-import { createFeedView } from "./modules/feed.js?v=44";
-import { startDiscussion, wireDiscussionPrefetch } from "./modules/api.js?v=43";
+import { normalizeTab } from "./modules/feed-cache.js?v=45";
+import { createUI } from "./modules/ui.js?v=45";
+import { createFeedView } from "./modules/feed.js?v=45";
+import { startDiscussion, wireDiscussionPrefetch } from "./modules/api.js?v=45";
 
 import { createSavedStories } from "./modules/saved.js";
 import { createSavedView } from "./modules/saved-view.js";
@@ -134,7 +135,7 @@ function refreshCurrentList() {
 }
 
 function loadStoryModule() {
-  storyModule ??= import("./modules/story.js?v=43").catch((error) => {
+  storyModule ??= import("./modules/story.js?v=45").catch((error) => {
     storyModule = null;
     throw error;
   });
@@ -211,7 +212,7 @@ function canHandleRouteInPlace(route) {
 }
 
 function applyFeed(feed) {
-  const nextFeed = feed === FEED_SAVED ? FEED_SAVED : normalizeFeed(feed);
+  const nextFeed = normalizeTab(feed);
   let scrollTop;
   if (touchInput.matches && nextFeed !== currentFeed && app.dataset.view === "list") {
     const panel = app.querySelector("#feed-panel");
