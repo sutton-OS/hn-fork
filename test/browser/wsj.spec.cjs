@@ -64,7 +64,7 @@ test.describe("WSJ tab", () => {
     let shift = 0;
     let fail = true;
     const requests = [];
-    await page.route("**/api/wsj?**", route => {
+    await page.route("**/api/stories?feed=wsj&**", route => {
       const url = new URL(route.request().url());
       requests.push(url.search);
       if (fail) return route.fulfill({ status: 502, json: { error: "Wall Street Journal stories are unavailable." } });
@@ -86,7 +86,7 @@ test.describe("WSJ tab", () => {
     await expect(rows(page)).toHaveCount(12);
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await expect(rows(page)).toHaveCount(42);
-    expect(requests.at(-1)).toBe("?offset=12&limit=30");
+    expect(requests.at(-1)).toBe("?feed=wsj&offset=12&limit=30");
 
     await page.getByRole("tab", { name: "Top" }).click();
     await page.evaluate(() => window.scrollTo(0, 0));

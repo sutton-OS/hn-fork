@@ -69,7 +69,6 @@ const handlers = {
   "/api/embeddable": require("../../api/embeddable"),
   "/api/reader": require("../../api/reader"),
   "/api/stories": require("../../api/stories"),
-  "/api/wsj": require("../../api/wsj"),
   "/api/thread": require("../../api/thread"),
   "/api/item": require("../../api/item"),
   "/api/html/feed": require("../../api/html/feed"),

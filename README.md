@@ -23,7 +23,7 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - `public/` — static UI (`index.html`, `app.js`, `styles.css`, vendored libs, fonts)
 - `public/modules/` — native ES modules for routing, API/cache, feeds, stories, comments, shared UI, and sanitization
 - `api/` — Vercel serverless endpoints for HN data, previews, and push alerts
-- `lib/wsj.js` — Wall Street Journal RSS fetching, parsing, and merging for `/api/wsj`
+- `lib/wsj.js` — Wall Street Journal RSS fetching, parsing, and merging; `lib/wsj-api.js` serves it through `/api/stories?feed=wsj`
 - `lib/hn.js` — shared HN fetch/normalize helpers for API routes
 - `lib/html.js` — HTML escaping, parser-based `sanitize-html` sanitizer, and plain-reader layout helpers
 - `test/` — unit/API regression tests and desktop/mobile Playwright tests
@@ -98,9 +98,9 @@ Story and comment pages fail on upstream fetch errors instead of silently skippi
 
 ## WSJ tab
 
-`GET /api/wsj?offset=…&limit=…` merges The Wall Street Journal's public Tech, Markets, U.S., World, Business, and Politics RSS feeds into one list, newest first. It covers the last seven days, up to 252 stories. It returns headlines, links, sections, and times, without summaries or photos. Links lose their tracking parameters. Opinion, lifestyle, and shopping pages are left out even when a news feed carries them.
+`GET /api/stories?feed=wsj&offset=…&limit=…` merges The Wall Street Journal's public Tech, Markets, U.S., World, Business, and Politics RSS feeds into one list, newest first. It covers the last seven days, up to 252 stories. It returns headlines, links, sections, and times, without summaries or photos. Links lose their tracking parameters. Opinion, lifestyle, and shopping pages are left out even when a news feed carries them.
 
-Each warm function reuses its merged list for 60 seconds, or 15 seconds for pull to refresh. If a feed fails, its last good copy stands in for up to an hour and the response skips the CDN cache. The endpoint fails only when every feed does. The politics feed uses social posts as titles, so another feed's headline wins when both carry a story.
+WSJ shares the stories function because the Vercel Hobby plan allows 12 functions per deployment and all 12 are in use. Each warm function reuses its merged list for 60 seconds, or 15 seconds for pull to refresh. If a feed fails, its last good copy stands in for up to an hour and the response skips the CDN cache. The endpoint fails only when every feed does. The politics feed uses social posts as titles, so another feed's headline wins when both carry a story.
 
 WSJ stories have negative IDs so they cannot be taken for Hacker News items. Their headlines open wsj.com directly. They have no discussion, preview, or bookmark, and alerts and the plain and classic readers do not include them.
 

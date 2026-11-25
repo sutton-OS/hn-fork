@@ -13,6 +13,7 @@ const {
   statusFromError,
   UPSTREAM,
 } = require("../lib/hn");
+const sendWsjStories = require("../lib/wsj-api");
 
 const UA = "hnx-stories/1.0";
 
@@ -20,6 +21,12 @@ module.exports = async function handler(req, res) {
   if (req.method !== "GET") {
     res.setHeader("allow", "GET");
     sendJSON(res, 405, { error: "Method not allowed." });
+    return;
+  }
+
+  // Not its own function: the Vercel Hobby plan allows 12 per deployment, and all 12 are in use.
+  if (getQueryString(req.query?.feed) === "wsj") {
+    await sendWsjStories(req, res);
     return;
   }
 

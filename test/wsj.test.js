@@ -1,5 +1,7 @@
 const { describe, it, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { WSJ_FEEDS, WSJ_LIMITS, articleURL, createWsjSource, mergeStories, parseFeed } = require("../lib/wsj");
 
 const originalFetch = global.fetch;
@@ -27,8 +29,8 @@ function upstream(feeds = {}) {
 }
 
 function loadHandler() {
-  delete require.cache[require.resolve("../api/wsj")];
-  return require("../api/wsj");
+  for (const file of ["../lib/wsj-api", "../api/stories"]) delete require.cache[require.resolve(file)];
+  return require("../api/stories");
 }
 
 async function get(handler, query = {}, method = "GET") {
@@ -38,7 +40,7 @@ async function get(handler, query = {}, method = "GET") {
     setHeader(name, value) { this.headers[name] = value; },
     send(body) { this.body = JSON.parse(body); },
   };
-  await handler({ method, query }, res);
+  await handler({ method, query: { feed: "wsj", ...query } }, res);
   return res;
 }
 
@@ -131,7 +133,7 @@ describe("WSJ source", () => {
   });
 });
 
-describe("/api/wsj", () => {
+describe("/api/stories?feed=wsj", () => {
   it("pages through every story", async () => {
     upstream({ RSSWSJD: rss(...Array.from({ length: 50 }, (_, i) => item({ link: `https://www.wsj.com/tech/${i}`, age: i + 1 }))) });
     const handler = loadHandler();
@@ -154,6 +156,7 @@ describe("/api/wsj", () => {
       [{ offset: "0", limit: "12" }, true], [{ offset: "12", limit: "30" }, true], [{ offset: "42", limit: "30" }, true],
       [{ offset: "13", limit: "30" }, false], [{ offset: "012", limit: "30" }, false], [{ offset: "0", limit: "30" }, false],
       [{ offset: "0", limit: "12", fresh: "1" }, false], [{ offset: ["0", "0"], limit: "12" }, false], [{}, false],
+      [{ feed: ["wsj", "wsj"], offset: "0", limit: "12" }, false], [{ offset: "0", limit: "12", other: "1" }, false],
     ]) {
       const res = await get(handler, query);
       assert.equal(res.statusCode, 200);
@@ -178,6 +181,19 @@ describe("/api/wsj", () => {
     assert.equal((await get(handler)).statusCode, 200);
   });
 
+  it("leaves Hacker News feeds alone", async () => {
+    const calls = [];
+    global.fetch = async (url) => { calls.push(url); return { ok: true, json: async () => [] }; };
+    const { body } = await get(loadHandler(), { feed: "top", offset: "0", limit: "12" });
+    assert.equal(body.feed, "top");
+    assert.deepEqual(calls, ["https://hacker-news.firebaseio.com/v0/topstories.json"]);
+  });
+
+  it("fits the 12 functions a Vercel Hobby deployment allows", () => {
+    const files = fs.readdirSync(path.join(__dirname, "../api"), { recursive: true }).filter((file) => file.endsWith(".js"));
+    assert.ok(files.length <= 12, `${files.length} functions`);
+  });
+
   it("rejects non-GET requests without fetching upstream", async () => {
     const calls = upstream();
     const res = await get(loadHandler(), {}, "POST");
@@ -189,13 +205,13 @@ describe("/api/wsj", () => {
 it("stores only the WSJ pages the app requests", async () => {
   const { feedPageUrl, isFeedPage, normalizeTab } = await import("../public/modules/feed-cache.js");
   const stored = (path) => isFeedPage(new URL(path, "https://hnx.example"));
-  assert.equal(feedPageUrl("wsj", 0, 12), "/api/wsj?offset=0&limit=12");
+  assert.equal(feedPageUrl("wsj", 0, 12), "/api/stories?feed=wsj&offset=0&limit=12");
   assert.equal(feedPageUrl("top", 12, 30), "/api/stories?feed=top&offset=12&limit=30");
   for (const feed of ["wsj", "best", "top", "new"]) {
     assert.ok(stored(feedPageUrl(feed, 0, 12)));
     assert.ok(stored(feedPageUrl(feed, 42, 30)));
   }
-  for (const path of ["/api/wsj?offset=0&limit=12&fresh=1", "/api/wsj?feed=best&offset=0&limit=12", "/api/stories?offset=0&limit=12", "/api/item?id=1"]) {
+  for (const path of ["/api/stories?feed=wsj&offset=0&limit=12&fresh=1", "/api/stories?feed=saved&offset=0&limit=12", "/api/stories?offset=0&limit=12", "/api/item?id=1"]) {
     assert.equal(stored(path), false, path);
   }
   assert.deepEqual(["wsj", "saved", "new", "other"].map(normalizeTab), ["wsj", "saved", "new", "best"]);
