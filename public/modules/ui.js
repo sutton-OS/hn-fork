@@ -1,27 +1,69 @@
 import { FEEDS, FEED_SAVED } from "./config.js";
-import { FEED_WSJ } from "./feed-cache.js?v=45";
+import { FEED_WSJ, FEED_WSJ_TOP, isWsjFeed, tabId } from "./feed-cache.js?v=46";
 
 const feedLabels = { best: "Best", top: "Top", new: "New", wsj: "WSJ", saved: "Saved" };
 
+const WSJ_VIEW_KEY = "hnx-wsj-view";
+const wsjViews = [[FEED_WSJ_TOP, "Top"], [FEED_WSJ, "New"]];
+
 export function createUI({ app, getCurrentFeed, setFeed, saved }) {
+  let wsjView = FEED_WSJ_TOP;
+  try {
+    if (localStorage.getItem(WSJ_VIEW_KEY) === FEED_WSJ) wsjView = FEED_WSJ;
+  } catch {
+    // The tab opens on Top when storage is unavailable.
+  }
+
+  function setWsjView(feed) {
+    wsjView = feed;
+    try {
+      localStorage.setItem(WSJ_VIEW_KEY, feed);
+    } catch {
+      // The choice still lasts until the page reloads.
+    }
+    setFeed(feed);
+  }
+
   function getFeedTab(feed) {
-    const isActive = feed === getCurrentFeed();
+    const isWsj = feed === FEED_WSJ;
+    const isActive = isWsj ? isWsjFeed(getCurrentFeed()) : feed === getCurrentFeed();
     return `
       <button
         class="feed-option"
         type="button"
         role="tab"
-        id="feed-tab-${feed}"
-        data-feed-option="${feed}"
+        id="${tabId(feed)}"
+        data-feed-option="${isWsj ? wsjView : feed}"
         aria-controls="feed-panel"
-        ${feed === FEED_WSJ ? 'aria-label="WSJ, Wall Street Journal"' : ""}
+        ${isWsj ? 'aria-label="WSJ, Wall Street Journal"' : ""}
         aria-selected="${isActive}"
         tabindex="${isActive ? 0 : -1}"
       >${feedLabels[feed]}${feed === FEED_SAVED ? ` <span class="saved-count" data-saved-count>${saved.count()}</span>` : ""}</button>
     `;
   }
 
+  /** Top and New, shown above the list on the WSJ tab. */
+  function wsjSwitch() {
+    if (!isWsjFeed(getCurrentFeed())) return "";
+    return `
+      <div class="wsj-views" role="group" aria-label="WSJ stories" data-wsj-views>
+        ${wsjViews.map(([feed, label]) => `
+          <button class="wsj-view" type="button" id="wsj-view-${feed}" data-wsj-view="${feed}"
+            aria-pressed="${feed === getCurrentFeed()}">${label}</button>
+        `).join("")}
+      </div>
+    `;
+  }
+
   function wireFeedToggleButtons(root = app) {
+    root.querySelector("[data-wsj-views]")?.addEventListener("click", (event) => {
+      const view = event.target.closest("[data-wsj-view]");
+      if (!view || view.dataset.wsjView === getCurrentFeed()) return;
+      const hadFocus = document.activeElement === view;
+      setWsjView(view.dataset.wsjView);
+      if (hadFocus) document.getElementById(view.id)?.focus({ preventScroll: true });
+    });
+
     const picker = root.querySelector("[data-feed-picker]");
     if (!picker) return;
 
@@ -108,5 +150,5 @@ export function createUI({ app, getCurrentFeed, setFeed, saved }) {
     `;
   }
 
-  return { wireFeedToggleButtons, topbar };
+  return { wireFeedToggleButtons, topbar, wsjSwitch };
 }

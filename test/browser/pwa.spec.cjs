@@ -59,7 +59,7 @@ test.describe("PWA installation", () => {
     }
     expect((await page.request.get("/sw.js")).headers()["cache-control"]).toBe("no-cache");
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toMatch(/\/sw\.js$/);
-    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v8"]);
+    expect((await page.evaluate(() => caches.keys())).sort()).toEqual(["hnx-feed-v1", "shell-v9"]);
     if (browserName === "chromium") {
       const devtools = await page.context().newCDPSession(page);
       expect((await devtools.send("Page.getAppManifest")).errors).toEqual([]);

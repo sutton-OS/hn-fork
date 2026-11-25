@@ -4,10 +4,10 @@ import { wireNotificationStories, wirePreview } from "./modules/preview-entry.js
 import { wireAlerts } from "./modules/alerts.js";
 import { touchInput, wirePWA } from "./modules/pwa.js";
 import { parseRoute } from "./modules/routing.js";
-import { normalizeTab } from "./modules/feed-cache.js?v=45";
-import { createUI } from "./modules/ui.js?v=45";
-import { createFeedView } from "./modules/feed.js?v=45";
-import { startDiscussion, wireDiscussionPrefetch } from "./modules/api.js?v=45";
+import { normalizeTab } from "./modules/feed-cache.js?v=46";
+import { createUI } from "./modules/ui.js?v=46";
+import { createFeedView } from "./modules/feed.js?v=46";
+import { startDiscussion, wireDiscussionPrefetch } from "./modules/api.js?v=46";
 
 import { createSavedStories } from "./modules/saved.js";
 import { createSavedView } from "./modules/saved-view.js";
@@ -135,7 +135,7 @@ function refreshCurrentList() {
 }
 
 function loadStoryModule() {
-  storyModule ??= import("./modules/story.js?v=45").catch((error) => {
+  storyModule ??= import("./modules/story.js?v=46").catch((error) => {
     storyModule = null;
     throw error;
   });

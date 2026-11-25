@@ -1,5 +1,6 @@
 import { PAGE_SIZE, INITIAL_PAGE_SIZE, FEED_SAVED, LIST_VISIBLE_REFRESH_AFTER_MS } from "./config.js";
-import { getStories, getRecentStories, getItem } from "./api.js?v=45";
+import { getStories, getRecentStories, getItem } from "./api.js?v=46";
+import { tabId } from "./feed-cache.js?v=46";
 import { touchInput } from "./pwa.js";
 import { navigateTo } from "./routing.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError, isInteractiveTarget } from "./utils.js";
@@ -15,7 +16,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
   /** The list on screen, and the list kept intact behind an open discussion. */
   let activeList = null;
   let parkedList = null;
-  const { topbar, wireFeedToggleButtons } = ui;
+  const { topbar, wireFeedToggleButtons, wsjSwitch } = ui;
 
   function setSelectedStoryElement(storyEl) {
     if (!storyEl) {
@@ -513,8 +514,9 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       app.innerHTML = `
         <section class="list-pane">
           ${topbar()}
-          <div id="feed-panel" role="tabpanel" aria-labelledby="feed-tab-${getCurrentFeed()}" aria-busy="true">
+          <div id="feed-panel" role="tabpanel" aria-labelledby="${tabId(getCurrentFeed())}" aria-busy="true">
             <div class="pull-indicator" aria-hidden="true"></div>
+            ${wsjSwitch()}
             <div class="feed-update"><button class="btn" type="button" data-feed-update hidden></button></div>
             <ul class="story-list" role="list"></ul>
             <p class="status" data-list-status hidden></p>
@@ -1002,7 +1004,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       app.innerHTML = `
         <section class="list-pane">
           ${topbar()}
-          <div id="feed-panel" role="tabpanel" aria-labelledby="feed-tab-${getCurrentFeed()}">
+          <div id="feed-panel" role="tabpanel" aria-labelledby="${tabId(getCurrentFeed())}">
             <p class="status">Could not load stories: ${escapeHTML(error.message)}</p>
           </div>
         </section>

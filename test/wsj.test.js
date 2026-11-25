@@ -2,7 +2,7 @@ const { describe, it, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { WSJ_FEEDS, WSJ_LIMITS, articleURL, createWsjSource, mergeStories, parseFeed } = require("../lib/wsj");
+const { WSJ_FEEDS, WSJ_LIMITS, articleURL, createWsjSource, mergeStories, parseFeed, rankStories } = require("../lib/wsj");
 
 const originalFetch = global.fetch;
 afterEach(() => { global.fetch = originalFetch; });
@@ -133,6 +133,43 @@ describe("WSJ source", () => {
   });
 });
 
+describe("WSJ Top", () => {
+  const titles = (lists, offsets) => rankStories(lists, offsets, now).map(({ title }) => title);
+
+  it("puts every section's lead before any section's second story", () => {
+    const tech = [story("tech/lead", 9000), story("tech/second", 10)];
+    const world = [story("world/lead", 8000), story("world/second", 20)];
+    assert.deepEqual(titles([tech, world]), ["world/lead", "tech/lead", "tech/second", "world/second"]);
+  });
+
+  it("uses a story's best place, and the first feed's headline", () => {
+    const lists = [[story("tech/a", 1), story("tech/b", 2)], [story("tech/b", 3, { title: "Social post" })]];
+    assert.deepEqual(titles(lists), ["tech/a", "tech/b"]);
+  });
+
+  it("skips routine items without letting them hold a place", () => {
+    const routine = [
+      story("cfo-journal/a", 1), story("pro/central-banking/b", 2), story("finance/currencies/c", 3),
+      story("business/d", 4, { title: "Energy Roundup: Market Talk" }), story("articles/e", 5, { title: "The WSJ Dollar Index Falls 0.27%" }),
+      story("world/f", 6, { title: "Oil Prices Fall" }),
+    ];
+    assert.deepEqual(titles([[...routine, story("business/lead", 900)], [story("tech/lead", 800), story("tech/second", 7)]]),
+      ["tech/lead", "business/lead", "tech/second"]);
+    assert.equal(titles([[story("business/oil-giant", 1, { title: "Big Oil Prices In a Recession" })]]).length, 1);
+  });
+
+  it("offsets a feed that is not ordered by importance", () => {
+    assert.deepEqual(titles([[story("tech/lead", 50), story("tech/second", 60)], [story("economy/data", 1)]], [0, 4]),
+      ["tech/lead", "tech/second", "economy/data"]);
+  });
+
+  it("uses older stories only after the last day's, and stops at two days", () => {
+    const hour = 3600;
+    assert.deepEqual(titles([[story("a", 47 * hour), story("b", 30), story("c", 49 * hour)], [story("d", 25 * hour)]]), ["b", "d", "a"]);
+    assert.equal(titles([Array.from({ length: 60 }, (_, i) => story(`s${i}`, i + 1))]).length, WSJ_LIMITS.topStories);
+  });
+});
+
 describe("/api/stories?feed=wsj", () => {
   it("pages through every story", async () => {
     upstream({ RSSWSJD: rss(...Array.from({ length: 50 }, (_, i) => item({ link: `https://www.wsj.com/tech/${i}`, age: i + 1 }))) });
@@ -146,13 +183,14 @@ describe("/api/stories?feed=wsj", () => {
       for (const entry of body.stories) ids.add(entry.id);
       query = body.hasMore ? { offset: String(body.nextOffset), limit: "30" } : null;
     }
-    assert.equal(ids.size, 50 + WSJ_FEEDS.length - 1);
+    assert.equal(ids.size, 50 + WSJ_FEEDS.filter(({ topOnly }) => !topOnly).length - 1);
   });
 
   it("caches only complete responses for the URLs the app requests", async () => {
     upstream();
     const handler = loadHandler();
     for (const [query, cached] of [
+      [{ feed: "wsj-top", offset: "0", limit: "12" }, true], [{ feed: "wsj-top", offset: "12", limit: "30" }, true], [{ feed: "wsj-top", offset: "13", limit: "30" }, false],
       [{ offset: "0", limit: "12" }, true], [{ offset: "12", limit: "30" }, true], [{ offset: "42", limit: "30" }, true],
       [{ offset: "13", limit: "30" }, false], [{ offset: "012", limit: "30" }, false], [{ offset: "0", limit: "30" }, false],
       [{ offset: "0", limit: "12", fresh: "1" }, false], [{ offset: ["0", "0"], limit: "12" }, false], [{}, false],
@@ -181,6 +219,27 @@ describe("/api/stories?feed=wsj", () => {
     assert.equal((await get(handler)).statusCode, 200);
   });
 
+  it("keeps the economy feed out of New, and its outages out of New's cache", async () => {
+    const economy = WSJ_FEEDS.find(({ topOnly }) => topOnly).path;
+    const titles = ({ body }) => body.stories.map(({ title }) => title);
+    const page = { offset: "0", limit: "12" };
+    upstream();
+    let handler = loadHandler();
+    assert.ok(!titles(await get(handler, page)).includes(economy));
+    const top = await get(handler, { ...page, feed: "wsj-top" });
+    assert.equal(top.body.feed, "wsj-top");
+    assert.ok(titles(top).includes(economy));
+
+    upstream({ [economy]: 503 });
+    handler = loadHandler();
+    assert.ok((await get(handler, page)).headers["vercel-cdn-cache-control"]);
+    assert.equal((await get(handler, { ...page, feed: "wsj-top" })).headers["cache-control"], "no-store");
+
+    upstream(Object.fromEntries(WSJ_FEEDS.filter(({ topOnly }) => !topOnly).map(({ path }) => [path, 503])));
+    handler = loadHandler();
+    assert.equal((await get(handler, { ...page, feed: "wsj-top" })).statusCode, 502);
+  });
+
   it("leaves Hacker News feeds alone", async () => {
     const calls = [];
     global.fetch = async (url) => { calls.push(url); return { ok: true, json: async () => [] }; };
@@ -207,12 +266,13 @@ it("stores only the WSJ pages the app requests", async () => {
   const stored = (path) => isFeedPage(new URL(path, "https://hnx.example"));
   assert.equal(feedPageUrl("wsj", 0, 12), "/api/stories?feed=wsj&offset=0&limit=12");
   assert.equal(feedPageUrl("top", 12, 30), "/api/stories?feed=top&offset=12&limit=30");
-  for (const feed of ["wsj", "best", "top", "new"]) {
+  assert.equal(feedPageUrl("wsj-top", 0, 12), "/api/stories?feed=wsj-top&offset=0&limit=12");
+  for (const feed of ["wsj", "wsj-top", "best", "top", "new"]) {
     assert.ok(stored(feedPageUrl(feed, 0, 12)));
     assert.ok(stored(feedPageUrl(feed, 42, 30)));
   }
   for (const path of ["/api/stories?feed=wsj&offset=0&limit=12&fresh=1", "/api/stories?feed=saved&offset=0&limit=12", "/api/stories?offset=0&limit=12", "/api/item?id=1"]) {
     assert.equal(stored(path), false, path);
   }
-  assert.deepEqual(["wsj", "saved", "new", "other"].map(normalizeTab), ["wsj", "saved", "new", "best"]);
+  assert.deepEqual(["wsj", "wsj-top", "saved", "new", "other"].map(normalizeTab), ["wsj", "wsj-top", "saved", "new", "best"]);
 });
