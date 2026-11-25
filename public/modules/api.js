@@ -1,6 +1,6 @@
-import { STORIES_ENDPOINT, ITEM_ENDPOINT, THREAD_ENDPOINT, PAGE_SIZE, COMMENTS_PAGE_SIZE, THREAD_PREFETCH_MAX, THREAD_PREFETCH_TTL_MS } from "./config.js";
-import { normalizeFeed, createAbortError } from "./utils.js";
-import { requestFeedPage, readRecentFeedPage } from "./feed-cache.js?v=43";
+import { ITEM_ENDPOINT, THREAD_ENDPOINT, PAGE_SIZE, COMMENTS_PAGE_SIZE, THREAD_PREFETCH_MAX, THREAD_PREFETCH_TTL_MS } from "./config.js";
+import { createAbortError } from "./utils.js";
+import { feedPageUrl, requestFeedPage, readRecentFeedPage } from "./feed-cache.js?v=45";
 
 const threadPrefetchCache = new Map();
 const inflightPrefetches = new Set();
@@ -308,8 +308,7 @@ export function normalizeStoriesPage(payload, { offset = 0, limit = PAGE_SIZE } 
 
 /** Last stored first page, when it is recent enough to show before the network. */
 export async function getRecentStories(feed, { limit = PAGE_SIZE } = {}) {
-  const url = `${STORIES_ENDPOINT}?feed=${normalizeFeed(feed)}&offset=0&limit=${limit}`;
-  const payload = await readRecentFeedPage(url);
+  const payload = await readRecentFeedPage(feedPageUrl(feed, 0, limit));
   return payload ? normalizeStoriesPage(payload, { offset: 0, limit }) : null;
 }
 
@@ -317,10 +316,9 @@ export async function getStories(
   feed,
   { signal, offset = 0, limit = PAGE_SIZE, fresh = false } = {},
 ) {
-  const normalizedFeed = normalizeFeed(feed);
   const safeOffset = Math.max(0, Number(offset) || 0);
   const safeLimit = Math.max(1, Number(limit) || PAGE_SIZE);
-  const expectedUrl = `${STORIES_ENDPOINT}?feed=${normalizedFeed}&offset=${safeOffset}&limit=${safeLimit}`;
+  const expectedUrl = feedPageUrl(feed, safeOffset, safeLimit);
 
   // Reuse the head-script prefetch for the first paint only.
   const early = window.__hnxStoriesPrefetch;

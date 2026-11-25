@@ -1,6 +1,7 @@
 import { FEEDS, FEED_SAVED } from "./config.js";
+import { FEED_WSJ } from "./feed-cache.js?v=45";
 
-const feedLabels = { best: "Best", top: "Top", new: "New", saved: "Saved" };
+const feedLabels = { best: "Best", top: "Top", new: "New", wsj: "WSJ", saved: "Saved" };
 
 export function createUI({ app, getCurrentFeed, setFeed, saved }) {
   function getFeedTab(feed) {
@@ -13,6 +14,7 @@ export function createUI({ app, getCurrentFeed, setFeed, saved }) {
         id="feed-tab-${feed}"
         data-feed-option="${feed}"
         aria-controls="feed-panel"
+        ${feed === FEED_WSJ ? 'aria-label="WSJ, Wall Street Journal"' : ""}
         aria-selected="${isActive}"
         tabindex="${isActive ? 0 : -1}"
       >${feedLabels[feed]}${feed === FEED_SAVED ? ` <span class="saved-count" data-saved-count>${saved.count()}</span>` : ""}</button>
@@ -71,7 +73,7 @@ export function createUI({ app, getCurrentFeed, setFeed, saved }) {
   function topbar(content = "") {
     const leftContent = content.trim() || `
       <div class="feed-picker" role="tablist" aria-label="Story feed" data-feed-picker>
-        ${[...FEEDS, FEED_SAVED].map(getFeedTab).join("")}
+        ${[...FEEDS, FEED_WSJ, FEED_SAVED].map(getFeedTab).join("")}
       </div>
     `;
 

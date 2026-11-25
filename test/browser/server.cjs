@@ -21,8 +21,20 @@ const offlineItems = [
   { id: 20, type: "story", title: "Field notes", time: now, score: 45, descendants: 8, url: "https://publisher.example/notes" },
   { id: 21, type: "story", title: "A short article", time: now, url: "https://publisher.example/short" },
 ];
+const wsjFeeds = {
+  RSSWSJD: [["Chip maker reports results", "tech/chip-results-1", 60], ["A columnist responds", "opinion/column-2", 30]],
+  RSSMarketsMain: [["Stocks &amp; bonds rise", "finance/stocks-3", 120]],
+};
+function wsjFeed(name) {
+  const entries = wsjFeeds[name] || [["Old news", "world/old-4", 30 * 24 * 60 * 60]];
+  return `<rss><channel><title>WSJ</title>${entries.map(([title, link, age]) => `<item>
+    <guid isPermaLink="false">${link}</guid><title>${title}</title>
+    <link>https://www.wsj.com/${link}?mod=rss_test</link>
+    <pubDate>${new Date((now - age) * 1000).toUTCString()}</pubDate></item>`).join("")}</channel></rss>`;
+}
 global.fetch = async url => ({
   ok: true,
+  text: async () => wsjFeed(url.split("/").at(-1)),
   json: async () => {
     const offline = fixtures.getStore();
     if (url.endsWith("stories.json")) {
@@ -57,6 +69,7 @@ const handlers = {
   "/api/embeddable": require("../../api/embeddable"),
   "/api/reader": require("../../api/reader"),
   "/api/stories": require("../../api/stories"),
+  "/api/wsj": require("../../api/wsj"),
   "/api/thread": require("../../api/thread"),
   "/api/item": require("../../api/item"),
   "/api/html/feed": require("../../api/html/feed"),
@@ -92,7 +105,7 @@ function createTestServer({ isNewShell = () => false } = {}) {
       res.setHeader("content-type", `${types[path.extname(file)] || "application/octet-stream"}; charset=utf-8`);
       let content = fs.readFileSync(file);
       if (isNewShell()) {
-        if (relative === "sw.js") content = content.toString().replace('"shell-v7"', '"shell-v8"');
+        if (relative === "sw.js") content = content.toString().replace('"shell-v8"', '"shell-v9"');
         if (relative === "index.html") content = content.toString().replace("<title>HNx</title>", "<title>HNx updated</title>");
       }
       res.end(content);

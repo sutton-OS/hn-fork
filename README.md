@@ -7,7 +7,7 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - **No accounts, cookies, analytics, or ads**
 - **Optional push alerts** use a per-browser subscription and server-side rules that can be deleted from the Alerts panel
 - **Self-hosted fonts** (no Google Fonts)
-- **Browser → first party only** for HN data (`/api/*`)
+- **Browser → first party only** for HN and WSJ data (`/api/*`)
 - **Publisher favicons** in the full app come from Google’s favicon service with no referrer
 - **Vendored DOMPurify** for comment/HTML sanitization (no CDN)
 - **Strict security headers** (CSP, HSTS, Referrer-Policy, Permissions-Policy, COOP/CORP)
@@ -23,6 +23,7 @@ Lightweight vanilla JS/CSS Hacker News client, built with a privacy-first browse
 - `public/` — static UI (`index.html`, `app.js`, `styles.css`, vendored libs, fonts)
 - `public/modules/` — native ES modules for routing, API/cache, feeds, stories, comments, shared UI, and sanitization
 - `api/` — Vercel serverless endpoints for HN data, previews, and push alerts
+- `lib/wsj.js` — Wall Street Journal RSS fetching, parsing, and merging for `/api/wsj`
 - `lib/hn.js` — shared HN fetch/normalize helpers for API routes
 - `lib/html.js` — HTML escaping, parser-based `sanitize-html` sanitizer, and plain-reader layout helpers
 - `test/` — unit/API regression tests and desktop/mobile Playwright tests
@@ -94,6 +95,14 @@ Opening a discussion keeps the feed's rows and scroll position for going back. R
 A direct discussion streams the title and story text before comments finish loading, using one request to Hacker News for the parent. A discussion opened from the feed shows the row's title at once. Discussions and replies start loading on sustained hover or on press, with at most two requests in flight; leaving or scrolling cancels them. Completed prefetches expire after 30 seconds and are consumed once. Opening prefetched comments fetches current story details in parallel.
 
 Story and comment pages fail on upstream fetch errors instead of silently skipping unavailable items. Retry controls preserve the failed page; genuine missing/deleted items still advance pagination. Each reply list owns its pagination cursor and deduplicates comment IDs across pages. Revisiting a discussion refreshes its comments. Comment indentation adds 14 pixels per level through depth six, then stops.
+
+## WSJ tab
+
+`GET /api/wsj?offset=…&limit=…` merges The Wall Street Journal's public Tech, Markets, U.S., World, Business, and Politics RSS feeds into one list, newest first. It covers the last seven days, up to 252 stories. It returns headlines, links, sections, and times, without summaries or photos. Links lose their tracking parameters. Opinion, lifestyle, and shopping pages are left out even when a news feed carries them.
+
+Each warm function reuses its merged list for 60 seconds, or 15 seconds for pull to refresh. If a feed fails, its last good copy stands in for up to an hour and the response skips the CDN cache. The endpoint fails only when every feed does. The politics feed uses social posts as titles, so another feed's headline wins when both carry a story.
+
+WSJ stories have negative IDs so they cannot be taken for Hacker News items. Their headlines open wsj.com directly. They have no discussion, preview, or bookmark, and alerts and the plain and classic readers do not include them.
 
 ## Saved and offline
 

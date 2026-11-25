@@ -1,5 +1,5 @@
 import { COMMENTS_PAGE_SIZE, COMMENTS_DOM_BATCH, MAX_COMMENT_DEPTH, COMMENT_CLAMP_PX } from "./config.js";
-import { fetchThread } from "./api.js?v=43";
+import { fetchThread } from "./api.js?v=45";
 import { sanitizeHNHTML } from "./sanitize.js?v=41";
 import { createTaskQueue, timeAgo, isAbortError, isInteractiveTarget } from "./utils.js";
 

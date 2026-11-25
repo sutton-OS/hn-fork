@@ -1,5 +1,5 @@
 import { PAGE_SIZE, INITIAL_PAGE_SIZE, FEED_SAVED, LIST_VISIBLE_REFRESH_AFTER_MS } from "./config.js";
-import { getStories, getRecentStories, getItem } from "./api.js?v=43";
+import { getStories, getRecentStories, getItem } from "./api.js?v=45";
 import { touchInput } from "./pwa.js";
 import { navigateTo } from "./routing.js";
 import { escapeHTML, getDomain, getSafeUrl, timeAgo, createElementFromHTML, isAbortError, isInteractiveTarget } from "./utils.js";
@@ -147,6 +147,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     return "";
   }
 
+  /** A Hacker News ID, which other stories do not have. */
   function getSelectedStoryId() {
     const stories = getListStoryElements();
     if (!stories.length) {
@@ -673,7 +674,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
       const applyFirstPage = (page) => {
         const stories = pageStories(page);
         if (!stories.length) return;
-        const selectedId = selectedStoryIndex > 0 ? getSelectedStoryId() : null;
+        const selectedId = selectedStoryIndex > 0 ? Number(listEl.children[selectedStoryIndex]?.dataset.storyId) : null;
         const keepRest = startsWith(stories);
         const oldRows = new Map(Array.from(listEl.children, (row) => [Number(row.dataset.storyId), row]));
         const rows = stories.map((story, index) => {
@@ -1028,6 +1029,8 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
     const storyTitle = escapeHTML(storyTitleRaw);
     const escapedStoryUrl = escapeHTML(storyUrl);
     const isExternal = !savedRow && Boolean(safeUrl);
+    // Stories from outside Hacker News have a section instead of a discussion, and no item to preview or save.
+    const section = savedRow ? "" : story.section || "";
     const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
     const age = storyAge(story);
     const titleContent = `
@@ -1035,6 +1038,7 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
         href="${escapedStoryUrl}"
         ${isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}
         ${savedRow ? 'aria-haspopup="dialog"' : "data-online-link"}
+        ${section ? 'data-preview-bypass="true"' : ""}
         data-story-id="${storyId}"
       >${storyTitle}</a>
     `;
@@ -1054,15 +1058,16 @@ export function createFeedView({ app, ui, getCurrentFeed, setViewController, isC
             <span class="meta-part"><span class="meta-divider" aria-hidden="true">·</span> <span data-story-age>${age}</span></span>
             <span class="meta-part">
               <span class="meta-divider" aria-hidden="true">·</span>
-              <a class="story-comments-link" href="${escapeHTML(discussionPath)}" data-online-link aria-label="comments on ${storyTitle}">comments</a>
+              ${section ? `<span>${escapeHTML(section)}</span>`
+                : `<a class="story-comments-link" href="${escapeHTML(discussionPath)}" data-online-link aria-label="comments on ${storyTitle}">comments</a>`}
             </span>
           </div>
-          <div class="story-save-actions">
+          ${section ? "" : `<div class="story-save-actions">
             ${savedView.bookmark(storyId)}
             ${savedRow ? savedView.overflow(storyTitleRaw) : ""}
-          </div>
+          </div>`}
         </div>
-        ${savedView.rowStatus()}
+        ${section ? "" : savedView.rowStatus()}
       </li>
     `;
   }

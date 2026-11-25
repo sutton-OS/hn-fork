@@ -229,21 +229,40 @@ iframe {
   gap: 20px;
 }
 
-@media (max-width: 360px) {
+/* Five tabs have to fit with wider fallback fonts and a three-digit saved count. */
+@media (max-width: 430px) {
+  .topbar {
+    gap: 8px;
+  }
+
   .feed-picker {
     gap: 12px;
   }
 }
 
-/* Leave room for wider fallback fonts and a three-digit saved count. */
-@media (max-width: 340px) {
-  .topbar,
+@media (max-width: 375px) {
   .feed-picker {
     gap: 8px;
   }
 
   .topbar-actions {
     gap: 4px;
+  }
+}
+
+@media (max-width: 359px) {
+  .feed-option .saved-count {
+    display: none;
+  }
+}
+
+@media (max-width: 340px) {
+  .feed-picker {
+    gap: 6px;
+  }
+
+  .feed-picker .feed-option {
+    font-size: 13px;
   }
 }
 
@@ -1385,6 +1404,8 @@ html:has(.preview-open) { overscroll-behavior: none; }
 
 .story-bookmark-meta {
   flex-wrap: nowrap;
+  /* Matches the bookmark button, which rows from outside Hacker News leave out. */
+  min-height: 44px;
   justify-content: space-between;
 }
 
